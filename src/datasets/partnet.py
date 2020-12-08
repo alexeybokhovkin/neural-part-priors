@@ -1,6 +1,5 @@
 import os
 import pickle
-import json
 
 import numpy as np
 import torch
@@ -34,3 +33,17 @@ class VoxelPartnetAllShapesDataset(Dataset):
 
     def __len__(self):
         return len(self.object_names)
+
+
+def generate_partnet_allshapes_datasets(root=None, partnet_to_dirs_path=None,
+                              train_samples='train.txt', val_samples='val.txt'):
+
+    Dataset = VoxelPartnetAllShapesDataset
+
+    train_dataset = Dataset(root, partnet_to_dirs_path, train_samples)
+    val_dataset = Dataset(root, partnet_to_dirs_path, val_samples)
+
+    return {
+        'train': train_dataset,
+        'val': val_dataset
+    }

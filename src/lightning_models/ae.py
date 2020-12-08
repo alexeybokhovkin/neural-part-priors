@@ -4,6 +4,7 @@ from argparse import Namespace
 import pytorch_lightning as pl
 
 from ..models.ae import AE_Encoder, AE_Decoder
+from ..datasets.partnet import VoxelPartnetAllShapesDataset
 
 class AELightning(pl.LightningModule):
     def __init__(self, hparams):
