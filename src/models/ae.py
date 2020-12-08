@@ -42,7 +42,15 @@ class AE_Decoder(nn.module):
         self.node_decoder = ConvDecoder(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups,
                                         scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings)
 
+        self.voxelLoss = nn.BCELoss()
+
     def forward(self, x_root, encoder_feature=None):
 
         pred_masks = self.node_decoder(x_root, encoder_feature)
         return pred_masks
+
+    def loss(self, x_pred, x_gt):
+
+        x_pred = torch.sigmoid(x_pred)
+        loss = self.voxelLoss(x_pred, x_gt)
+        return loss
