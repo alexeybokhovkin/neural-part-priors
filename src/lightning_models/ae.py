@@ -30,7 +30,7 @@ class AELightning(pl.LightningModule):
                 else:
                     self.config[_k] = "null"
 
-        datasets = generate_partnet_allshapes_datasets(**config)
+        datasets = generate_partnet_allshapes_datasets(config['data'], config['dataset'], config['partnet_to_dirs_path'])
         self.train_dataset = datasets['train']
         self.val_dataset = datasets['val']
 
@@ -44,7 +44,7 @@ class AELightning(pl.LightningModule):
         torch.backends.cudnn.enabled = False
         torch.backends.cudnn.deterministic = True
 
-        with open(os.path.join(config['checkpoint_dir'], config['model'], config['version'], 'config.json'), 'w') as f:
+        with open(os.path.join(config['base'], config['checkpoint_dir'], config['model'], config['version'], 'config.json'), 'w') as f:
             json.dump(self.config, f)
 
     def configure_optimizers(self):
@@ -69,55 +69,94 @@ class AELightning(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
 
-        batch[0] = [x[None, ...] for x in batch[0]]
-        partnet_geos = torch.cat(batch[0]).unsqueeze(dim=1)
-
+        partnet_geos = batch[0]
         input_batch = tuple([partnet_geos])
 
-        total_loss = self.forward(input_batch)
+        losses = self.forward(input_batch)
+        losses_unweighted = losses.copy()
 
-        return {'loss': total_loss}
+        for key in losses:
+            losses[key] *= self.config['loss_weight_' + key]
+
+        total_loss = 0
+        for loss_name, loss in losses.items():
+            total_loss += loss
+
+        return {'loss': total_loss,
+                'loss_components': losses,
+                'loss_components_unweighted': losses_unweighted}
 
     def training_epoch_end(self, outputs):
 
         log = {}
-        train_loss = torch.zeros(1)
+        losses = losses_unweighted = {}
+        train_loss = torch.zeros(1).type_as(outputs[0]['loss'])
+        for key in outputs[0]['loss_components']:
+            losses[key] = 0
+            losses_unweighted[key] = 0
 
         for output in outputs:
             train_loss += output['loss']
+            for key in losses:
+                losses[key] += output['loss_components'][key]
+                losses_unweighted[key] += output['loss_components_unweighted'][key]
         train_loss /= len(outputs)
+        for key in losses:
+            losses[key] /= len(outputs)
+            losses_unweighted[key] /= len(outputs)
 
+        log.update(losses)
+        log.update(losses_unweighted)
         log.update({'loss': train_loss})
         results = {'log': log}
-        return results
 
     def validation_step(self, batch, batch_idx):
 
-        batch[0] = [x[None, ...] for x in batch[0]]
-        partnet_geos = torch.cat(batch[0]).unsqueeze(dim=1)
-
+        partnet_geos = batch[0]
         input_batch = tuple([partnet_geos])
 
-        total_loss = self.forward(input_batch)
+        losses = self.forward(input_batch)
+        losses_unweighted = losses.copy()
 
-        return {'val_loss': total_loss}
+        for key in losses:
+            losses[key] *= self.config['loss_weight_' + key]
+
+        total_loss = 0
+        for loss_name, loss in losses.items():
+            total_loss += loss
+
+        return {'val_loss': total_loss,
+                'val_loss_components': losses,
+                'val_loss_components_unweighted': losses_unweighted}
 
     def validation_epoch_end(self, outputs):
 
         log = {}
-        val_loss = torch.zeros(1)
+        losses = losses_unweighted = {}
+        val_loss = torch.zeros(1).type_as(outputs[0]['val_loss'])
+        for key in outputs[0]['val_loss_components']:
+            losses['val_' + key] = 0
+            losses_unweighted['val_' + key] = 0
 
         for output in outputs:
-            val_loss += output['loss']
+            val_loss += output['val_loss']
+            for key in losses:
+                losses[key] += output['val_loss_components'][key[4:]]
+                losses_unweighted[key] += output['val_loss_components_unweighted'][key[4:]]
         val_loss /= len(outputs)
+        for key in losses:
+            losses[key] /= len(outputs)
+            losses_unweighted[key] /= len(outputs)
 
+        log.update(losses)
+        log.update(losses_unweighted)
         log.update({'val_loss': val_loss})
         results = {'log': log}
         return results
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.config['batch_size'],
-                          shuffle=self.config['shuffle'], num_workers=self.config['num_workers'], drop_last=True)
+                          shuffle=True, num_workers=self.config['num_workers'], drop_last=True)
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=self.config['batch_size'],

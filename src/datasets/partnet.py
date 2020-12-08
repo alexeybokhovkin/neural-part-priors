@@ -7,15 +7,17 @@ from torch.utils.data import Dataset
 
 class VoxelPartnetAllShapesDataset(Dataset):
 
-    def __init__(self, root, partnet_to_dirs_path, object_list):
+    def __init__(self, datadir, dataset, partnet_to_dirs_path, object_list):
 
-        self.root = root
+        self.datadir = datadir
+        self.dataset = dataset
+        self.partnet_to_dirs_path = os.path.join(datadir, dataset, partnet_to_dirs_path)
 
-        with open(partnet_to_dirs_path, 'rb') as f:
+        with open(self.partnet_to_dirs_path, 'rb') as f:
             self.partnet_to_dirs = pickle.load(f)
 
         if isinstance(object_list, str):
-            with open(os.path.join(self.root, object_list), 'r') as f:
+            with open(os.path.join(self.datadir, self.dataset, object_list), 'r') as f:
                 self.object_names = [item.rstrip() for item in f.readlines()]
         else:
             self.object_names = object_list
@@ -24,10 +26,10 @@ class VoxelPartnetAllShapesDataset(Dataset):
         partnet_id = self.object_names[index]
         common_path = self.partnet_to_dirs[partnet_id]
 
-        geo_fn = os.path.join(common_path+'_geo', f'{partnet_id}_full.npy')
+        geo_fn = os.path.join(self.datadir, common_path+'_geo', f'{partnet_id}_full.npy')
         shape_mask = torch.FloatTensor(np.load(geo_fn))
 
-        output = (shape_mask)
+        output = (shape_mask,)
 
         return output
 
@@ -35,13 +37,13 @@ class VoxelPartnetAllShapesDataset(Dataset):
         return len(self.object_names)
 
 
-def generate_partnet_allshapes_datasets(root=None, partnet_to_dirs_path=None,
-                              train_samples='train.txt', val_samples='val.txt'):
+def generate_partnet_allshapes_datasets(data=None, dataset=None, partnet_to_dirs_path=None,
+                                        train_samples='train.txt', val_samples='val.txt'):
 
     Dataset = VoxelPartnetAllShapesDataset
 
-    train_dataset = Dataset(root, partnet_to_dirs_path, train_samples)
-    val_dataset = Dataset(root, partnet_to_dirs_path, val_samples)
+    train_dataset = Dataset(data, dataset, partnet_to_dirs_path, train_samples)
+    val_dataset = Dataset(data, dataset, partnet_to_dirs_path, val_samples)
 
     return {
         'train': train_dataset,

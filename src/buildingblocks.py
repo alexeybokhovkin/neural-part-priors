@@ -235,9 +235,13 @@ class ConvBlock(nn.Module):
                                              padding=padding)
 
     def forward(self, x):
+        # print('Input enc:', x.shape)
         if self.pooling is not None:
             x = self.pooling(x)
+            # print('After pool:', x.shape)
         x = self.basic_module(x)
+        # print('After conv:', x.shape)
+        # print()
 
         return x
 
@@ -275,7 +279,7 @@ class ConvEncoder(nn.Module):
     def forward(self, x):
         encoder_features = []
         for i, encoder in enumerate(self.shape_encoders):
-            x = encoder(x, verbose=0)
+            x = encoder(x)
             encoder_features.insert(0, x)
 
         return x, encoder_features
@@ -301,7 +305,7 @@ class DeconvBlock(nn.Module):
 
     def __init__(self, in_channels, out_channels, kernel_size=3,
                  scale_factor=2, basic_module=DoubleConv, conv_layer_order='crg', num_groups=8, stride=1, padding=1,
-                 join=None):
+                 output_padding=1, join=None):
         super(DeconvBlock, self).__init__()
 
         self.join = join
@@ -320,7 +324,7 @@ class DeconvBlock(nn.Module):
                                                kernel_size=kernel_size,
                                                stride=scale_factor,
                                                padding=1,
-                                               output_padding=1)
+                                               output_padding=output_padding)
             # adapt the number of in_channels for the ExtResNetBlock
             in_channels = out_channels
 
@@ -338,10 +342,14 @@ class DeconvBlock(nn.Module):
                                              order=conv_layer_order,
                                              num_groups=num_groups)
 
-    def forward(self, x, feature):
+    def forward(self, x, feature=None):
 
+        # print('Input dec:', x.shape)
         x = self.upsample(x)
+        # print('After up:', x.shape)
         x = self.basic_module(x)
+        # print('After conv:', x.shape)
+        # print()
 
         if self.join == 'add':
             x = x + feature
@@ -352,7 +360,7 @@ class DeconvBlock(nn.Module):
 class ConvDecoder(nn.Module):
 
     def __init__(self, dec_in_f_maps, dec_out_f_maps, num_convs_per_block, conv_layer_order, num_groups,
-                 scale_factors, kernel_sizes, strides, paddings):
+                 scale_factors, kernel_sizes, strides, paddings, output_paddings):
         super(ConvDecoder, self).__init__()
 
         if num_convs_per_block == 1:
@@ -369,7 +377,8 @@ class ConvDecoder(nn.Module):
             decoder = DeconvBlock(in_feature_num, out_feature_num, basic_module=basic_module,
                                   conv_layer_order=conv_layer_order, num_groups=num_groups,
                                   scale_factor=scale_factors[i], kernel_size=kernel_sizes[i],
-                                  stride=strides[i], padding=paddings[i], join=None)
+                                  stride=strides[i], padding=paddings[i], join=None,
+                                  output_padding=output_paddings[i])
 
             background_decoders.append(decoder)
         self.background_decoders = nn.ModuleList(background_decoders)
