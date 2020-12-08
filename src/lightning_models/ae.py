@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR, MultiStepLR
+from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 
 from ..models.ae import AE_Encoder, AE_Decoder
@@ -60,17 +61,64 @@ class AELightning(pl.LightningModule):
         encoder_features += [features]
         output = self.decoder(fmap)
 
-        self.decoder.
+        geo_loss = self.decoder.loss(output, partnet_geos)
 
-
-        losses = {'geo': 0}
-
-        for i, object_losses in enumerate(all_losses):
-            for loss_name, loss in object_losses.items():
-                losses[loss_name] = losses[loss_name] + loss
-        losses['kldiv'] = kldiv_loss
-        losses['part_centers'] = part_center_loss
-
-        del all_losses
+        losses = {'geo': geo_loss.mean()}
 
         return losses
+
+    def training_step(self, batch, batch_idx):
+
+        batch[0] = [x[None, ...] for x in batch[0]]
+        partnet_geos = torch.cat(batch[0]).unsqueeze(dim=1)
+
+        input_batch = tuple([partnet_geos])
+
+        total_loss = self.forward(input_batch)
+
+        return {'loss': total_loss}
+
+    def training_epoch_end(self, outputs):
+
+        log = {}
+        train_loss = torch.zeros(1)
+
+        for output in outputs:
+            train_loss += output['loss']
+        train_loss /= len(outputs)
+
+        log.update({'loss': train_loss})
+        results = {'log': log}
+        return results
+
+    def validation_step(self, batch, batch_idx):
+
+        batch[0] = [x[None, ...] for x in batch[0]]
+        partnet_geos = torch.cat(batch[0]).unsqueeze(dim=1)
+
+        input_batch = tuple([partnet_geos])
+
+        total_loss = self.forward(input_batch)
+
+        return {'val_loss': total_loss}
+
+    def validation_epoch_end(self, outputs):
+
+        log = {}
+        val_loss = torch.zeros(1)
+
+        for output in outputs:
+            val_loss += output['loss']
+        val_loss /= len(outputs)
+
+        log.update({'val_loss': val_loss})
+        results = {'log': log}
+        return results
+
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=self.config['batch_size'],
+                          shuffle=self.config['shuffle'], num_workers=self.config['num_workers'], drop_last=True)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.config['batch_size'],
+                          shuffle=False, num_workers=self.config['num_workers'], drop_last=True)
