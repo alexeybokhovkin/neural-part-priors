@@ -241,7 +241,7 @@ class ConvBlock(nn.Module):
                                              stride=stride,
                                              padding=padding)
 
-    def forward(self, x, verbose=0):
+    def forward(self, x):
         if self.pooling is not None:
             x = self.pooling(x)
         x = self.basic_module(x)
@@ -249,12 +249,12 @@ class ConvBlock(nn.Module):
         return x
 
 
-class Encoder(nn.Module):
+class ConvEncoder(nn.Module):
 
     def __init__(self, enc_in_f_maps=None, enc_out_f_maps=None,
                  layer_order='crg', num_groups=8, enc_strides=1, enc_paddings=1, enc_conv_kernel_sizes=3,
                  num_convs_per_block=1, split_enc_children=False, **kwargs):
-        super(Encoder, self).__init__()
+        super(ConvEncoder, self).__init__()
 
         self.split_enc_children = split_enc_children
 
@@ -267,7 +267,6 @@ class Encoder(nn.Module):
 
         encoders = []
         for i, out_feature_num in enumerate(enc_out_f_maps):
-            # if i == 0 or i == 1:
             if i == 0:
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, apply_pooling=False,
                                   basic_module=basic_module,
@@ -282,25 +281,13 @@ class Encoder(nn.Module):
             encoders.append(encoder)
         self.shape_encoders = nn.ModuleList(encoders)
 
-        if self.split_enc_children:
-            self.split_encoder = ConvBlock(enc_out_f_maps[-2], 100, apply_pooling=False,
-                                         basic_module=basic_module,
-                                         conv_layer_order='cr', num_groups=num_groups,
-                                         conv_kernel_size=3, stride=1,
-                                         padding=1)
-
     def forward(self, x):
         encoder_features = []
         for i, encoder in enumerate(self.shape_encoders):
             x = encoder(x, verbose=0)
             encoder_features.insert(0, x)
-            if i == len(self.shape_encoders) - 2 and self.split_enc_children:
-                x_children = self.split_encoder(x)
 
-        if self.split_enc_children:
-            return x, encoder_features, x_children
-        else:
-            return x, encoder_features
+        return x, encoder_features
 
 
 class DeconvBlock(nn.Module):
@@ -322,8 +309,11 @@ class DeconvBlock(nn.Module):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size=3,
-                 scale_factor=2, basic_module=DoubleConv, conv_layer_order='crg', num_groups=8, stride=1, padding=1):
+                 scale_factor=2, basic_module=DoubleConv, conv_layer_order='crg', num_groups=8, stride=1, padding=1,
+                 join=None):
         super(DeconvBlock, self).__init__()
+
+        self.join = join
         if basic_module == DoubleConv:
             # if DoubleConv is the basic_module use nearest neighbor interpolation for upsampling
             self.upsample = None
@@ -361,67 +351,8 @@ class DeconvBlock(nn.Module):
 
         x = self.upsample(x)
         x = self.basic_module(x)
-        x = x + feature
 
-        return x
-    
-
-class DeconvBlockStraight(nn.Module):
-    """
-    A single module for decoder path consisting of the upsample layer
-    (either learned ConvTranspose3d or interpolation) followed by a DoubleConv
-    module.
-    Args:
-        in_channels (int): number of input channels
-        out_channels (int): number of output channels
-        kernel_size (int): size of the convolving kernel
-        scale_factor (tuple): used as the multiplier for the image H/W/D in
-            case of nn.Upsample or as stride in case of ConvTranspose3d, must reverse the MaxPool3d operation
-            from the corresponding encoder
-        basic_module(nn.Module): either ResNetBlock or DoubleConv
-        conv_layer_order (string): determines the order of layers
-            in `DoubleConv` module. See `DoubleConv` for more info.
-        num_groups (int): number of groups for the GroupNorm
-    """
-
-    def __init__(self, in_channels, out_channels, kernel_size=3,
-                 scale_factor=2, basic_module=DoubleConv, conv_layer_order='crg', num_groups=8, stride=1, padding=1):
-        super(DeconvBlockStraight, self).__init__()
-        if basic_module == DoubleConv:
-            # if DoubleConv is the basic_module use nearest neighbor interpolation for upsampling
-            self.upsample = None
-        else:
-            # otherwise use ConvTranspose3d (bear in mind your GPU memory)
-            # make sure that the output size reverses the MaxPool3d from the corresponding encoder
-            # (D_out = (D_in − 1) ×  stride[0] − 2 ×  padding[0] +  kernel_size[0] +  output_padding[0])
-            # also scale the number of channels from in_channels to out_channels so that summation joining
-            # works correctly
-            scale_factor = tuple([scale_factor]) * 3
-            self.upsample = nn.ConvTranspose3d(in_channels,
-                                               out_channels,
-                                               kernel_size=kernel_size,
-                                               stride=scale_factor,
-                                               padding=1,
-                                               output_padding=1)
-            # adapt the number of in_channels for the ExtResNetBlock
-            in_channels = out_channels
-        
-        if basic_module == SingleConv:
-            self.basic_module = basic_module(in_channels, out_channels,
-                                             kernel_size=kernel_size,
-                                             order=conv_layer_order,
-                                             num_groups=num_groups,
-                                             stride=stride,
-                                             padding=padding)
-        elif basic_module == DoubleConv:
-            self.basic_module = basic_module(in_channels, out_channels,
-                                             encoder=False,
-                                             kernel_size=kernel_size,
-                                             order=conv_layer_order,
-                                             num_groups=num_groups)
-
-    def forward(self, x):
-        x = self.upsample(x)
-        x = self.basic_module(x)
+        if self.join == 'add':
+            x = x + feature
 
         return x
