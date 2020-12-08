@@ -170,16 +170,9 @@ class ExtResNetBlock(nn.Module):
     def forward(self, x):
         # apply first convolution and save the output as a residual
         out = self.conv1(x)
-        # print('conv1: ', out.shape)
         residual = out
-
-        # residual block
         out = self.conv2(out)
-        # print('conv2: ', out.shape)
         out = self.conv3(out)
-        # print('conv3: ', out.shape)
-        # print()
-
         out += residual
         out = self.non_linearity(out)
 
@@ -253,10 +246,8 @@ class ConvEncoder(nn.Module):
 
     def __init__(self, enc_in_f_maps=None, enc_out_f_maps=None,
                  layer_order='crg', num_groups=8, enc_strides=1, enc_paddings=1, enc_conv_kernel_sizes=3,
-                 num_convs_per_block=1, split_enc_children=False, **kwargs):
+                 num_convs_per_block=1, **kwargs):
         super(ConvEncoder, self).__init__()
-
-        self.split_enc_children = split_enc_children
 
         if num_convs_per_block == 1:
             basic_module = SingleConv
@@ -269,15 +260,15 @@ class ConvEncoder(nn.Module):
         for i, out_feature_num in enumerate(enc_out_f_maps):
             if i == 0:
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, apply_pooling=False,
-                                  basic_module=basic_module,
-                                  conv_layer_order=layer_order, num_groups=num_groups,
-                                  conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
-                                  padding=enc_paddings[i])
+                                    basic_module=basic_module,
+                                    conv_layer_order=layer_order, num_groups=num_groups,
+                                    conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
+                                    padding=enc_paddings[i])
             else:
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, basic_module=basic_module,
-                                  conv_layer_order=layer_order, num_groups=num_groups,
-                                  conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
-                                  padding=enc_paddings[i])
+                                    conv_layer_order=layer_order, num_groups=num_groups,
+                                    conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
+                                    padding=enc_paddings[i])
             encoders.append(encoder)
         self.shape_encoders = nn.ModuleList(encoders)
 
@@ -354,5 +345,61 @@ class DeconvBlock(nn.Module):
 
         if self.join == 'add':
             x = x + feature
+
+        return x
+
+
+class ConvDecoder(nn.Module):
+
+    def __init__(self, dec_in_f_maps, dec_out_f_maps, num_convs_per_block, conv_layer_order, num_groups,
+                 scale_factors, kernel_sizes, strides, paddings):
+        super(ConvDecoder, self).__init__()
+
+        if num_convs_per_block == 1:
+            basic_module = SingleConv
+        elif num_convs_per_block == 2:
+            basic_module = DoubleConv
+        elif num_convs_per_block == 0:
+            basic_module = ExtResNetBlock
+
+        background_decoders = []
+        for i in range(len(dec_in_f_maps)):
+            in_feature_num = dec_in_f_maps[i]
+            out_feature_num = dec_out_f_maps[i]
+            decoder = DeconvBlock(in_feature_num, out_feature_num, basic_module=basic_module,
+                                  conv_layer_order=conv_layer_order, num_groups=num_groups,
+                                  scale_factor=scale_factors[i], kernel_size=kernel_sizes[i],
+                                  stride=strides[i], padding=paddings[i], join=None)
+
+            background_decoders.append(decoder)
+        self.background_decoders = nn.ModuleList(background_decoders)
+
+    def forward(self, x):
+        for i, decoder in enumerate(self.background_decoders):
+            x = decoder(x)
+
+        return x
+
+
+class FeatureVector(nn.Module):
+
+    def __init__(self, pool_kernel_size, pooling=True):
+        super(FeatureVector, self).__init__()
+
+        self.pooling = pooling
+
+        if self.pooling:
+            self.pooling = nn.AvgPool3d(kernel_size=pool_kernel_size)
+        else:
+            kernel_size = (pool_kernel_size, pool_kernel_size, pool_kernel_size)
+            self.conv = nn.Conv3d(128, 128, kernel_size, padding=(0, 0, 0), bias=True, stride=(1, 1, 1))
+        self.flatten = nn.Flatten()
+
+    def forward(self, x):
+        if self.pooling:
+            x = self.pooling(x)
+        else:
+            x = self.conv(x)
+        x = self.flatten(x)
 
         return x
