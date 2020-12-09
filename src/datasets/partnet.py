@@ -22,14 +22,21 @@ class VoxelPartnetAllShapesDataset(Dataset):
         else:
             self.object_names = object_list
 
+        self.class2id = {'chair': 0,
+                         'table': 1,
+                         'storagefurniture': 2,
+                         'bed': 3,
+                         'trashcan': 4}
+
     def __getitem__(self, index):
         partnet_id = self.object_names[index]
         common_path = self.partnet_to_dirs[partnet_id]
+        class_id = self.class2id[common_path]
 
         geo_fn = os.path.join(self.datadir, common_path+'_geo', f'{partnet_id}_full.npy')
         shape_mask = torch.FloatTensor(np.load(geo_fn))
 
-        output = (shape_mask,)
+        output = (shape_mask, class_id)
 
         return output
 

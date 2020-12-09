@@ -345,14 +345,18 @@ class DeconvBlock(nn.Module):
     def forward(self, x, feature=None):
 
         # print('Input dec:', x.shape)
+        if self.join == 1:
+            x = x + feature
+        elif self.join == 2:
+            # print('Feat:', feature.shape)
+            x = torch.cat([x, feature], dim=1)
+        # print('After join:', x.shape)
+
         x = self.upsample(x)
         # print('After up:', x.shape)
         x = self.basic_module(x)
         # print('After conv:', x.shape)
         # print()
-
-        if self.join == 'add':
-            x = x + feature
 
         return x
 
@@ -360,7 +364,7 @@ class DeconvBlock(nn.Module):
 class ConvDecoder(nn.Module):
 
     def __init__(self, dec_in_f_maps, dec_out_f_maps, num_convs_per_block, conv_layer_order, num_groups,
-                 scale_factors, kernel_sizes, strides, paddings, output_paddings):
+                 scale_factors, kernel_sizes, strides, paddings, output_paddings, joins):
         super(ConvDecoder, self).__init__()
 
         if num_convs_per_block == 1:
@@ -377,15 +381,16 @@ class ConvDecoder(nn.Module):
             decoder = DeconvBlock(in_feature_num, out_feature_num, basic_module=basic_module,
                                   conv_layer_order=conv_layer_order, num_groups=num_groups,
                                   scale_factor=scale_factors[i], kernel_size=kernel_sizes[i],
-                                  stride=strides[i], padding=paddings[i], join=None,
+                                  stride=strides[i], padding=paddings[i], join=joins[i],
                                   output_padding=output_paddings[i])
 
             background_decoders.append(decoder)
         self.background_decoders = nn.ModuleList(background_decoders)
 
-    def forward(self, x):
+    def forward(self, x, features=None):
         for i, decoder in enumerate(self.background_decoders):
-            x = decoder(x)
+            feature = features[i] if features else None
+            x = decoder(x, feature)
 
         return x
 

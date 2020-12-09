@@ -10,7 +10,7 @@ from torch.optim.lr_scheduler import StepLR, MultiStepLR
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 
-from ..models.ae import AE_Encoder, AE_Decoder
+from ..models.ae import AE_Encoder, AE_Decoder, AE_Skip_Decoder, Class_Head
 from ..datasets.partnet import generate_partnet_allshapes_datasets
 
 class AELightning(pl.LightningModule):
@@ -30,12 +30,22 @@ class AELightning(pl.LightningModule):
                 else:
                     self.config[_k] = "null"
 
+        self.use_classification = config['use_classification']
+        self.use_reconstruction = config['use_reconstruction']
+        self.use_skip = config['use_skip']
+
         datasets = generate_partnet_allshapes_datasets(config['data'], config['dataset'], config['partnet_to_dirs_path'])
         self.train_dataset = datasets['train']
         self.val_dataset = datasets['val']
 
         self.encoder = AE_Encoder(**config)
-        self.decoder = AE_Decoder(**config)
+        if self.use_reconstruction:
+            if self.use_skip:
+                self.decoder = AE_Skip_Decoder(**config)
+            else:
+                self.decoder = AE_Decoder(**config)
+        if self.use_classification:
+            self.classifier = Class_Head(**config)
 
         random.seed(config['manual_seed'])
         np.random.seed(config['manual_seed'])
@@ -55,22 +65,31 @@ class AELightning(pl.LightningModule):
 
     def forward(self, batch):
         partnet_geos = batch[0]
+        class_ids = batch[1]
+
+        losses = {}
 
         encoder_features = []
         fmap, features = self.encoder(partnet_geos)
         encoder_features += [features]
-        output = self.decoder(fmap)
 
-        geo_loss = self.decoder.loss(output, partnet_geos)
+        if self.use_reconstruction:
+            output = self.decoder(fmap, features)
+            geo_loss = self.decoder.loss(output, partnet_geos)
+            losses['geo'] = geo_loss.mean()
 
-        losses = {'geo': geo_loss.mean()}
+        if self.use_classification:
+            pred_classes = self.classifier(fmap)
+            class_loss = self.classifier.loss(pred_classes, class_ids)
+            losses['class'] = class_loss.mean()
 
         return losses
 
     def training_step(self, batch, batch_idx):
 
         partnet_geos = batch[0]
-        input_batch = tuple([partnet_geos])
+        class_ids = batch[1]
+        input_batch = tuple([partnet_geos, class_ids])
 
         losses = self.forward(input_batch)
         losses_unweighted = losses.copy()
@@ -116,7 +135,8 @@ class AELightning(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
 
         partnet_geos = batch[0]
-        input_batch = tuple([partnet_geos])
+        class_ids = batch[1]
+        input_batch = tuple([partnet_geos, class_ids])
 
         losses = self.forward(input_batch)
         losses_unweighted = losses.copy()
