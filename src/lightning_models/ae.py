@@ -85,6 +85,26 @@ class AELightning(pl.LightningModule):
 
         return losses
 
+    def infer(self, batch):
+        partnet_geos = batch[0]
+        class_ids = batch[1]
+
+        encoder_features = []
+        fmap, features = self.encoder(partnet_geos)
+        encoder_features += [features]
+
+        output = []
+
+        if self.use_reconstruction:
+            pred_masks = self.decoder(fmap, features)
+            output.append(pred_masks)
+
+        if self.use_classification:
+            pred_classes = self.classifier(fmap)
+            output.append(pred_classes)
+
+        return output
+
     def training_step(self, batch, batch_idx):
 
         partnet_geos = batch[0]
