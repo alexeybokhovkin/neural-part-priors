@@ -11,21 +11,23 @@ from src.lightning_models.ae import AELightning
 
 def main(args):
     config = load_config(args)
+    CHECKPOINTS = os.path.join(config.base, config.checkpoint_dir, config.model, config.version, 'checkpoints')
+    os.makedirs(os.path.join(config.base, config.checkpoint_dir, config.model, config.version), exist_ok=True)
+    os.makedirs(CHECKPOINTS, exist_ok=True)
 
     tb_logger = TensorBoardLogger(os.path.join(config.base, config.checkpoint_dir),
                                   name=config.model,
                                   version=config.version)
-    CHECKPOINTS = os.path.join(config.base, config.checkpoint_dir, config.model, config.version, 'checkpoints')
     checkpoint_callback = ModelCheckpoint(
         monitor='val_loss',
-        filepath=CHECKPOINTS,
+        dirpath=CHECKPOINTS,
+        filename='{epoch}-{val_loss:.4f}',
         save_top_k=50
     )
-    os.makedirs(CHECKPOINTS, exist_ok=True)
     model = AELightning(config)
 
     trainer = Trainer(
-        checkpoint_callback=checkpoint_callback,
+        callbacks=[checkpoint_callback],
         logger=tb_logger,
         gpus=config.gpus,
         accelerator=config.distributed_backend,

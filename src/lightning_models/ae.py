@@ -89,8 +89,9 @@ class AELightning(pl.LightningModule):
     def training_epoch_end(self, outputs):
 
         log = {}
-        losses = losses_unweighted = {}
-        train_loss = torch.zeros(1).type_as(outputs[0]['loss'])
+        losses = {}
+        losses_unweighted = {}
+        train_loss = torch.tensor(0).type_as(outputs[0]['loss'])
         for key in outputs[0]['loss_components']:
             losses[key] = 0
             losses_unweighted[key] = 0
@@ -106,9 +107,11 @@ class AELightning(pl.LightningModule):
             losses_unweighted[key] /= len(outputs)
 
         log.update(losses)
-        log.update(losses_unweighted)
         log.update({'loss': train_loss})
-        results = {'log': log}
+
+        self.log('loss', log['loss'])
+        for key in losses:
+            self.log(key, log[key])
 
     def validation_step(self, batch, batch_idx):
 
@@ -132,8 +135,9 @@ class AELightning(pl.LightningModule):
     def validation_epoch_end(self, outputs):
 
         log = {}
-        losses = losses_unweighted = {}
-        val_loss = torch.zeros(1).type_as(outputs[0]['val_loss'])
+        losses = {}
+        losses_unweighted = {}
+        val_loss = torch.tensor(0).type_as(outputs[0]['val_loss'])
         for key in outputs[0]['val_loss_components']:
             losses['val_' + key] = 0
             losses_unweighted['val_' + key] = 0
@@ -149,10 +153,11 @@ class AELightning(pl.LightningModule):
             losses_unweighted[key] /= len(outputs)
 
         log.update(losses)
-        log.update(losses_unweighted)
         log.update({'val_loss': val_loss})
-        results = {'log': log}
-        return results
+
+        self.log('val_loss', log['val_loss'])
+        for key in losses:
+            self.log(key, log[key])
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.config['batch_size'],
