@@ -15,7 +15,7 @@ from ..datasets.partnet import generate_partnet_allshapes_datasets
 
 class AELightning(pl.LightningModule):
 
-    def __init__(self, hparams):
+    def __init__(self, hparams, eval_mode=False):
         super(AELightning, self).__init__()
 
         if isinstance(hparams, dict):
@@ -34,9 +34,10 @@ class AELightning(pl.LightningModule):
         self.use_reconstruction = config['use_reconstruction']
         self.use_skip = config['use_skip']
 
-        datasets = generate_partnet_allshapes_datasets(config['data'], config['dataset'], config['partnet_to_dirs_path'])
-        self.train_dataset = datasets['train']
-        self.val_dataset = datasets['val']
+        if not eval_mode:
+            datasets = generate_partnet_allshapes_datasets(config['data'], config['dataset'], config['partnet_to_dirs_path'])
+            self.train_dataset = datasets['train']
+            self.val_dataset = datasets['val']
 
         self.encoder = AE_Encoder(**config)
         if self.use_reconstruction:
@@ -54,8 +55,9 @@ class AELightning(pl.LightningModule):
         torch.backends.cudnn.enabled = False
         torch.backends.cudnn.deterministic = True
 
-        with open(os.path.join(config['base'], config['checkpoint_dir'], config['model'], config['version'], 'config.json'), 'w') as f:
-            json.dump(self.config, f)
+        if not eval_mode:
+            with open(os.path.join(config['base'], config['checkpoint_dir'], config['model'], config['version'], 'config.json'), 'w') as f:
+                json.dump(self.config, f)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.config['learning_rate'], weight_decay=self.config['weight_decay'])
@@ -92,7 +94,7 @@ class AELightning(pl.LightningModule):
         output = []
         encoder_features = []
         fmap, features = self.encoder(partnet_geos)
-        output.appenf(fmap)
+        output.append(fmap)
         encoder_features += [features]
 
         if self.use_reconstruction:

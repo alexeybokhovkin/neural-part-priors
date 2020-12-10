@@ -36,7 +36,7 @@ class VoxelPartnetAllShapesDataset(Dataset):
         geo_fn = os.path.join(self.datadir, common_path+'_geo', f'{partnet_id}_full.npy')
         shape_mask = torch.FloatTensor(np.load(geo_fn))
 
-        output = (shape_mask, class_id)
+        output = (shape_mask, class_id, partnet_id)
 
         return output
 
