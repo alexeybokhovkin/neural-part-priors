@@ -89,11 +89,11 @@ class AELightning(pl.LightningModule):
         partnet_geos = batch[0]
         class_ids = batch[1]
 
+        output = []
         encoder_features = []
         fmap, features = self.encoder(partnet_geos)
+        output.appenf(fmap)
         encoder_features += [features]
-
-        output = []
 
         if self.use_reconstruction:
             pred_masks = self.decoder(fmap, features)
