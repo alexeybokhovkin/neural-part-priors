@@ -15,11 +15,6 @@ from src.data_utils.hierarchy import Tree
 from src.utils.gnn import collate_feats, sym_reflect_tree
 from src.datasets.partnet import generate_scannet_allshapes_datasets, generate_scannet_allshapes_rot_datasets
 
-from unet3d.model import GeoEncoder, HierarchicalDecoder
-from unet3d.hierarchy import Tree
-from datasets.shapenet import generate_scannet_datasets, generate_scannet_allshapes_datasets, generate_scannet_allshapes_rot_datasets
-from utils.gnn import collate_feats, sym_reflect_tree
-
 
 class Unet3DGNNPartnetLightning(pl.LightningModule):
     def __init__(self, hparams):

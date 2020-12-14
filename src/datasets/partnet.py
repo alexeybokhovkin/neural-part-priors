@@ -61,7 +61,6 @@ def generate_partnet_allshapes_datasets(data=None, dataset=None, partnet_to_dirs
 class VoxelisedScanNetAllShapesGNNDataset(Dataset):
 
     def __init__(self, root, partnet_to_dirs_path, object_list, data_features, load_geo=False,
-                 shapes_to_scans_path=None, parts_to_shapes_path=None, cats_to_shapes_path=None,
                  shapenet_voxelized_path=None):
         self.root = root
         self.data_features = data_features
@@ -76,19 +75,6 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
                 self.object_names = [item.rstrip() for item in f.readlines()]
         else:
             self.object_names = object_list
-
-        # load metadata
-        with open(shapes_to_scans_path, 'rb') as fin:
-            self.shapes_to_scans = json.load(fin)
-        with open(parts_to_shapes_path, 'rb') as fin:
-            self.parts_to_shapes = json.load(fin)
-        self.shapes_to_parts = {self.parts_to_shapes[k]: k for k in self.parts_to_shapes}
-        with open(cats_to_shapes_path, 'rb') as fin:
-            self.cats_to_shapes = json.load(fin)
-        self.shapes_to_cats = {}
-        for cat_id in self.cats_to_shapes:
-            for obj_id in self.cats_to_shapes[cat_id]:
-                self.shapes_to_cats[obj_id] = cat_id
 
     def __getitem__(self, index):
         partnet_scannet_id = self.object_names[index]
@@ -194,8 +180,7 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
 def generate_scannet_allshapes_datasets(root=None, partnet_to_dirs_path=None,
                               train_samples='train.txt', val_samples='val.txt',
                               data_features=('object',), load_geo=True,
-                              shapes_to_scans_path=None, parts_to_shapes_path=None,
-                              cats_to_shapes_path=None, shapenet_voxelized_path=None,
+                              shapenet_voxelized_path=None,
                               **kwargs):
     if isinstance(data_features, str):
         data_features = [data_features]
@@ -203,14 +188,8 @@ def generate_scannet_allshapes_datasets(root=None, partnet_to_dirs_path=None,
     Dataset = VoxelisedScanNetAllShapesGNNDataset
 
     train_dataset = Dataset(root, partnet_to_dirs_path, train_samples, data_features, load_geo,
-                            shapes_to_scans_path=shapes_to_scans_path,
-                            parts_to_shapes_path=parts_to_shapes_path,
-                            cats_to_shapes_path=cats_to_shapes_path,
                             shapenet_voxelized_path=shapenet_voxelized_path)
     val_dataset = Dataset(root, partnet_to_dirs_path, val_samples, data_features, load_geo,
-                          shapes_to_scans_path=shapes_to_scans_path,
-                          parts_to_shapes_path=parts_to_shapes_path,
-                          cats_to_shapes_path=cats_to_shapes_path,
                           shapenet_voxelized_path=shapenet_voxelized_path)
 
     return {
@@ -222,7 +201,6 @@ def generate_scannet_allshapes_datasets(root=None, partnet_to_dirs_path=None,
 class VoxelisedScanNetAllShapesRotGNNDataset(VoxelisedScanNetAllShapesGNNDataset):
 
     def __init__(self, root, partnet_to_dirs_path, object_list, data_features, load_geo=False,
-                 shapes_to_scans_path=None, parts_to_shapes_path=None, cats_to_shapes_path=None,
                  shapenet_voxelized_path=None):
         self.root = root
         self.data_features = data_features
@@ -238,25 +216,11 @@ class VoxelisedScanNetAllShapesRotGNNDataset(VoxelisedScanNetAllShapesGNNDataset
         else:
             self.object_names = object_list
 
-        # load metadata
-        with open(shapes_to_scans_path, 'rb') as fin:
-            self.shapes_to_scans = json.load(fin)
-        with open(parts_to_shapes_path, 'rb') as fin:
-            self.parts_to_shapes = json.load(fin)
-        self.shapes_to_parts = {self.parts_to_shapes[k]: k for k in self.parts_to_shapes}
-        with open(cats_to_shapes_path, 'rb') as fin:
-            self.cats_to_shapes = json.load(fin)
-        self.shapes_to_cats = {}
-        for cat_id in self.cats_to_shapes:
-            for obj_id in self.cats_to_shapes[cat_id]:
-                self.shapes_to_cats[obj_id] = cat_id
-
     def __getitem__(self, index):
         partnet_scannet_id = self.object_names[index]
         tokens = partnet_scannet_id.split('_')
         partnet_id = tokens[0]
         rotation = tokens[4]
-        id_without_rotation = '_'.join(tokens[:-1])
         common_path = self.partnet_to_dirs[partnet_id]
         if 'object' in self.data_features:
             geo_fn = os.path.join(common_path+'_geo_8rot', partnet_id + f'_{rotation}.npy')
@@ -288,8 +252,7 @@ class VoxelisedScanNetAllShapesRotGNNDataset(VoxelisedScanNetAllShapesGNNDataset
 def generate_scannet_allshapes_rot_datasets(root=None, partnet_to_dirs_path=None,
                               train_samples='train.txt', val_samples='val.txt',
                               data_features=('object',), load_geo=True,
-                              shapes_to_scans_path=None, parts_to_shapes_path=None,
-                              cats_to_shapes_path=None, shapenet_voxelized_path=None,
+                              shapenet_voxelized_path=None,
                               **kwargs):
     if isinstance(data_features, str):
         data_features = [data_features]
@@ -297,14 +260,8 @@ def generate_scannet_allshapes_rot_datasets(root=None, partnet_to_dirs_path=None
     Dataset = VoxelisedScanNetAllShapesRotGNNDataset
 
     train_dataset = Dataset(root, partnet_to_dirs_path, train_samples, data_features, load_geo,
-                            shapes_to_scans_path=shapes_to_scans_path,
-                            parts_to_shapes_path=parts_to_shapes_path,
-                            cats_to_shapes_path=cats_to_shapes_path,
                             shapenet_voxelized_path=shapenet_voxelized_path)
     val_dataset = Dataset(root, partnet_to_dirs_path, val_samples, data_features, load_geo,
-                          shapes_to_scans_path=shapes_to_scans_path,
-                          parts_to_shapes_path=parts_to_shapes_path,
-                          cats_to_shapes_path=cats_to_shapes_path,
                           shapenet_voxelized_path=shapenet_voxelized_path)
 
     return {
