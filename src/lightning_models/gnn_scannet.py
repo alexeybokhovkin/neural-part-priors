@@ -16,9 +16,9 @@ from src.utils.gnn import collate_feats, sym_reflect_tree
 from src.datasets.partnet import generate_scannet_allshapes_datasets, generate_scannet_allshapes_rot_datasets
 
 
-class Unet3DGNNPartnetLightning(pl.LightningModule):
+class GNNPartnetLightning(pl.LightningModule):
     def __init__(self, hparams):
-        super(Unet3DGNNPartnetLightning, self).__init__()
+        super(GNNPartnetLightning, self).__init__()
 
         if isinstance(hparams, dict):
             hparams = Namespace(**hparams)
