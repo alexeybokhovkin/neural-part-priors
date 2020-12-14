@@ -364,7 +364,7 @@ class DeconvBlock(nn.Module):
 class ConvDecoder(nn.Module):
 
     def __init__(self, dec_in_f_maps, dec_out_f_maps, num_convs_per_block, conv_layer_order, num_groups,
-                 scale_factors, kernel_sizes, strides, paddings, output_paddings, joins):
+                 scale_factors, kernel_sizes, strides, paddings, output_paddings, joins, last_conv=False):
         super(ConvDecoder, self).__init__()
 
         if num_convs_per_block == 1:
@@ -374,7 +374,9 @@ class ConvDecoder(nn.Module):
         elif num_convs_per_block == 0:
             basic_module = ExtResNetBlock
 
-        background_decoders = []
+        self.last_conv = last_conv
+
+        decoders = []
         for i in range(len(dec_in_f_maps)):
             in_feature_num = dec_in_f_maps[i]
             out_feature_num = dec_out_f_maps[i]
@@ -384,13 +386,20 @@ class ConvDecoder(nn.Module):
                                   stride=strides[i], padding=paddings[i], join=joins[i],
                                   output_padding=output_paddings[i])
 
-            background_decoders.append(decoder)
-        self.background_decoders = nn.ModuleList(background_decoders)
+            decoders.append(decoder)
+        self.decoders = nn.ModuleList(decoders)
+        self.decoder_last_conv = basic_module(out_feature_num, 1,
+                                              kernel_size=1,
+                                              order='c',
+                                              stride=1,
+                                              padding=0)
 
     def forward(self, x, features=None):
-        for i, decoder in enumerate(self.background_decoders):
+        for i, decoder in enumerate(self.decoders):
             feature = features[i] if features else None
             x = decoder(x, feature)
+        if self.last_conv:
+            x = self.decoder_last_conv(x)
 
         return x
 

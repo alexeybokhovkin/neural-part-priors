@@ -7,8 +7,8 @@ import os
 import pickle
 
 from unet3d.hierarchy import Tree
-from unet3d.buildingblocks import Decoder3DNonAligned, Decoder3D, Encoder3D, FeatureVector
-from utils.gnn import linear_assignment, IoULoss
+from utils.gnn import linear_assignment
+from ..buildingblocks import ConvDecoder
 
 
 class LeafClassifier(nn.Module):
@@ -186,45 +186,19 @@ class MasksRefiner(nn.Module):
 class PartDecoder(nn.Module):
 
     def __init__(self, feat_len, dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order,
-                 num_groups, scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings,
-                 encode_mask=False, predict_part_centers=False):
+                 num_groups, scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings):
         super(PartDecoder, self).__init__()
 
-        self.encode_mask = encode_mask
-        self.predict_part_centers = predict_part_centers
-
-        if encode_mask or predict_part_centers:
-            self.geo_decoder = Decoder3D(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups,
-                                         scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings)
-        else:
-            self.geo_decoder = Decoder3DNonAligned(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups,
-                                                   scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings)
-
-    def forward(self, x, mask_feature=None):
-
-        x = x[..., None, None, None]
-        if self.encode_mask or self.predict_part_centers:
-            x = self.geo_decoder(x, mask_feature)
-        else:
-            x = self.geo_decoder(x)
-
-        return x
-
-
-class PartGeoDecoder(nn.Module):
-    def __init__(self, geo_feat_len, node_feat_len, dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order,
-                 num_groups, scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings):
-        super(PartGeoDecoder, self).__init__()
-
-        self.geo_decoder = Decoder3DNonAligned(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order,
-                                               num_groups, scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings)
+        self.geo_decoder = ConvDecoder(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups,
+                                       scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings)
 
     def forward(self, x):
+
         x = x[..., None, None, None]
         x = self.geo_decoder(x)
-        x = torch.sigmoid(x)
 
         return x
+
 
 class GNNChildDecoder(nn.Module):
 
@@ -446,7 +420,6 @@ class RecursiveDecoder(nn.Module):
         self.bceLoss = nn.BCELoss(reduction='none')
         self.semCELoss = nn.CrossEntropyLoss(reduction='none')
         self.childrenCELoss = nn.CrossEntropyLoss()
-        self.iouLoss = IoULoss()
 
         self.enc_hier = enc_hier
         
