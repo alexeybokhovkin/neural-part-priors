@@ -108,7 +108,6 @@ class AELightning(pl.LightningModule):
         return output
 
     def training_step(self, batch, batch_idx):
-
         partnet_geos = batch[0]
         class_ids = batch[1]
         input_batch = tuple([partnet_geos, class_ids])
@@ -128,7 +127,6 @@ class AELightning(pl.LightningModule):
                 'loss_components_unweighted': losses_unweighted}
 
     def training_epoch_end(self, outputs):
-
         log = {}
         losses = {}
         losses_unweighted = {}
@@ -155,7 +153,6 @@ class AELightning(pl.LightningModule):
             self.log(key, log[key])
 
     def validation_step(self, batch, batch_idx):
-
         partnet_geos = batch[0]
         class_ids = batch[1]
         input_batch = tuple([partnet_geos, class_ids])
@@ -175,7 +172,6 @@ class AELightning(pl.LightningModule):
                 'val_loss_components_unweighted': losses_unweighted}
 
     def validation_epoch_end(self, outputs):
-
         log = {}
         losses = {}
         losses_unweighted = {}
