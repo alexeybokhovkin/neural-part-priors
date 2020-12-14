@@ -33,8 +33,6 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
                 else:
                     self.config[_k] = "null"
 
-        # datasets = generate_scannet_datasets(**config)
-        # datasets = generate_scannet_allshapes_datasets(**config)
         datasets = generate_scannet_allshapes_rot_datasets(**config)
         self.train_dataset = datasets['train']
         self.val_dataset = datasets['val']
@@ -55,10 +53,6 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
         with open(os.path.join(config['checkpoint_dir'], config['model'], config['version'], 'config.json'), 'w') as f:
             json.dump(self.config, f)
 
-        # self.sampler_weights = list(np.load(os.path.join(config['sample_weights_dir'], 'sampler_weights.npy')))
-        # with open(os.path.join(config['sample_weights_dir'], 'loss_weights.pkl'), 'rb') as f:
-        #     self.loss_weights = pickle.load(f)
-
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.config['learning_rate'], weight_decay=self.config['weight_decay'])
         scheduler = StepLR(optimizer, gamma=self.config['gamma'],
@@ -71,16 +65,14 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
         masks = batch[2]
         gt_trees = batch[3]
         partnet_ids = batch[4]
-
         rotations = batch[5]
 
         x_roots = []
+        all_losses = []
         mask_codes, mask_features = [], []
         encoder_features = []
-        kldiv_loss = 0
-        part_center_loss = 0
+
         for i, mask in enumerate(masks):
-            cuda_device = mask.get_device()
             x_root, feature = self.encoder.root_latents(scannet_geos[i][None, ...])
             encoder_features += [feature]
             if self.config['encode_mask']:
@@ -93,8 +85,6 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
 
             x_roots += [x_root]
 
-        all_losses = []
-
         for i, x_root in enumerate(x_roots):
             cuda_device = x_root.get_device()
             gt_tree = gt_trees[i][0].to("cuda:{}".format(cuda_device))
@@ -103,35 +93,26 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
                                                        mask_feature=mask_features[i],
                                                        scan_geo=scannet_geos[i][None, ...],
                                                        encoder_features=encoder_features[i],
-                                                       rotation=rotations[i]
-                                                       )
+                                                       rotation=rotations[i])
             object_losses = output[0]
             all_losses += [object_losses]
 
-        losses = {'geo': 0,
-                  'geo_prior': 0,
-                  'leaf': 0,
-                  'exists': 0,
-                  'semantic': 0,
-                  'latent': 0,
-                  'edge_exists': 0,
-                  'num_children': 0,
-                  'split_enc_children': 0,
-                  'kldiv': 0,
-                  'part_center_loss': 0,
-                  'root_cls': 0,
-                  'geo_refined': 0,
-                  'geo_full_shape': 0,
-                  'rotation': 0}
+        losses = {'geo': [],
+                  'geo_prior': [],
+                  'leaf': [],
+                  'exists': [],
+                  'semantic': [],
+                  'latent': [],
+                  'edge_exists': [],
+                  'num_children': [],
+                  'root_cls': [],
+                  'rotation': []}
 
         for i, object_losses in enumerate(all_losses):
             for loss_name, loss in object_losses.items():
-                # losses[loss_name] = losses[loss_name] + loss * loss_weights[i]
-                losses[loss_name] = losses[loss_name] + loss
-        losses['kldiv'] = kldiv_loss
-        losses['part_centers'] = part_center_loss
-
-        del all_losses
+                losses[loss_name].append(loss)
+        for loss_name in losses:
+            losses[loss_name] = torch.mean(losses[loss_name])
 
         return losses
 
@@ -141,27 +122,20 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
         masks = batch[2]
         gt_trees = batch[3]
         partnet_ids = batch[4]
-
         rotations = batch[5]
 
         x_roots = []
-        children_roots_all = []
         mask_codes, mask_features = [], []
         encoder_features = []
-        kldiv_loss = 0
+        all_losses = []
+        predicted_trees = []
+        all_priors = []
+        all_leaves_geos = []
+        pred_rotations = []
+
         for i, mask in enumerate(masks):
-            cuda_device = mask.get_device()
-            if self.config['enc_hier']:
-                gt_tree = gt_trees[i][0].to("cuda:{}".format(cuda_device))
-                # gt_tree = gt_trees[i][0]
-                x_root = self.model.root_latents(gt_tree)
-            else:
-                if self.config['split_enc_children']:
-                    x_root, children_roots = self.encoder.root_latents(scannet_geos[i][None, ...])
-                    children_roots_all += [children_roots]
-                else:
-                    x_root, feature = self.encoder.root_latents(scannet_geos[i][None, ...])
-                    encoder_features += [feature]
+            x_root, feature = self.encoder.root_latents(scannet_geos[i][None, ...])
+            encoder_features += [feature]
             if self.config['encode_mask']:
                 mask_code, mask_feature = self.mask_encoder.root_latents(scannet_geos[i][None, ...])
                 mask_codes += [mask_code]
@@ -171,12 +145,6 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
                 mask_features += [None]
             x_roots += [x_root]
 
-        all_losses = []
-        predicted_trees = []
-        all_priors = []
-        all_leaves_geos = []
-        pred_rotations = []
-
         for i, x_root in enumerate(x_roots):
             cuda_device = x_root.get_device()
             gt_tree = gt_trees[i][0].to("cuda:{}".format(cuda_device))
@@ -185,8 +153,7 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
                                                                                                     mask_feature=mask_features[i],
                                                                                                     scan_geo=scannet_geos[i][None, ...],
                                                                                                     encoder_features=encoder_features[i],
-                                                                                                    rotation=rotations[i]
-                                                                                                    )
+                                                                                                    rotation=rotations[i])
 
             predicted_tree, S_priors, pred_rotation = self.decoder(x_root,
                                           mask_code=mask_codes[i],
@@ -194,39 +161,33 @@ class Unet3DGNNPartnetLightning(pl.LightningModule):
                                           scan_geo=scannet_geos[i][None, ...],
                                           full_label=gt_tree.root.label,
                                           encoder_features=encoder_features[i],
-                                          rotation=rotations[i]
-                                          )
+                                          rotation=rotations[i])
 
             predicted_trees += [predicted_tree]
             pred_rotations += [pred_rotation]
-
             all_losses += [object_losses]
             all_leaves_geos += [all_leaf_geos]
             all_priors += [S_priors]
 
-        losses = {'geo': 0,
-                  'geo_prior': 0,
-                  'leaf': 0,
-                  'exists': 0,
-                  'semantic': 0,
-                  'latent': 0,
-                  'edge_exists': 0,
-                  'num_children': 0,
-                  'split_enc_children': 0,
-                  'kldiv': 0,
-                  'part_center_loss': 0,
-                  'root_cls': 0,
-                  'geo_refined': 0,
-                  'geo_full_shape': 0,
-                  'rotation': 0}
-        for object_losses in all_losses:
+        losses = {'geo': [],
+                  'geo_prior': [],
+                  'leaf': [],
+                  'exists': [],
+                  'semantic': [],
+                  'latent': [],
+                  'edge_exists': [],
+                  'num_children': [],
+                  'root_cls': [],
+                  'rotation': []}
+
+        for i, object_losses in enumerate(all_losses):
             for loss_name, loss in object_losses.items():
-                losses[loss_name] = losses[loss_name] + loss
+                losses[loss_name].append(loss)
+        for loss_name in losses:
+            losses[loss_name] = torch.mean(losses[loss_name])
 
         output = [predicted_trees, x_roots, losses, all_leaves_geos, all_priors, pred_rotations]
         output = tuple(output)
-
-        del all_losses
 
         return output
 
