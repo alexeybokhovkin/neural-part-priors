@@ -6,8 +6,8 @@ import numpy as np
 import os
 import pickle
 
-from unet3d.hierarchy import Tree
-from utils.gnn import linear_assignment
+from ..data_utils.hierarchy import Tree
+from ..utils.gnn import linear_assignment
 from ..buildingblocks import ConvDecoder
 
 
