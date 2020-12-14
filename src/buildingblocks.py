@@ -274,11 +274,11 @@ class ConvEncoder(nn.Module):
                                     conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
                                     padding=enc_paddings[i])
             encoders.append(encoder)
-        self.shape_encoders = nn.ModuleList(encoders)
+        self.encoders = nn.ModuleList(encoders)
 
     def forward(self, x):
         encoder_features = []
-        for i, encoder in enumerate(self.shape_encoders):
+        for i, encoder in enumerate(self.encoders):
             x = encoder(x)
             encoder_features.insert(0, x)
 
