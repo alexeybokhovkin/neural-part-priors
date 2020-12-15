@@ -1,9 +1,13 @@
 import os
 import pickle
+import json
+from collections import namedtuple
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+from ..data_utils.hierarchy import Tree
 
 class VoxelPartnetAllShapesDataset(Dataset):
 
@@ -33,7 +37,7 @@ class VoxelPartnetAllShapesDataset(Dataset):
         common_path = self.partnet_to_dirs[partnet_id]
         class_id = self.class2id[common_path]
 
-        geo_fn = os.path.join(self.datadir, common_path+'_geo', f'{partnet_id}_full.npy')
+        geo_fn = os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}_full.npy')
         shape_mask = torch.FloatTensor(np.load(geo_fn))
 
         output = (shape_mask, class_id, partnet_id)
@@ -44,13 +48,13 @@ class VoxelPartnetAllShapesDataset(Dataset):
         return len(self.object_names)
 
 
-def generate_partnet_allshapes_datasets(data=None, dataset=None, partnet_to_dirs_path=None,
+def generate_partnet_allshapes_datasets(datadir=None, dataset=None, partnet_to_dirs_path=None,
                                         train_samples='train.txt', val_samples='val.txt'):
 
     Dataset = VoxelPartnetAllShapesDataset
 
-    train_dataset = Dataset(data, dataset, partnet_to_dirs_path, train_samples)
-    val_dataset = Dataset(data, dataset, partnet_to_dirs_path, val_samples)
+    train_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, train_samples)
+    val_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, val_samples)
 
     return {
         'train': train_dataset,
@@ -60,9 +64,10 @@ def generate_partnet_allshapes_datasets(data=None, dataset=None, partnet_to_dirs
 
 class VoxelisedScanNetAllShapesGNNDataset(Dataset):
 
-    def __init__(self, root, partnet_to_dirs_path, object_list, data_features, load_geo=False,
+    def __init__(self, datadir, dataset, partnet_to_dirs_path, object_list, data_features, load_geo=False,
                  shapenet_voxelized_path=None):
-        self.root = root
+        self.datadir = datadir
+        self.dataset = dataset
         self.data_features = data_features
         self.load_geo = load_geo
         self.shapenet_voxelized_path = shapenet_voxelized_path
@@ -71,7 +76,7 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
             self.partnet_to_dirs = pickle.load(f)
 
         if isinstance(object_list, str):
-            with open(os.path.join(self.root, object_list), 'r') as f:
+            with open(os.path.join(self.datadir, self.dataset, object_list), 'r') as f:
                 self.object_names = [item.rstrip() for item in f.readlines()]
         else:
             self.object_names = object_list
@@ -82,9 +87,8 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
         partnet_id = tokens[0]
         common_path = self.partnet_to_dirs[partnet_id]
         if 'object' in self.data_features:
-            geo_fn = os.path.join(common_path + '_geo', f'{partnet_id}.npy')
-            # geo_fn = os.path.join(common_path+'_corrected_geo', f'{partnet_scannet_id}.npy')
-            obj = self.load_object(os.path.join(common_path+'_hier', partnet_id + '.json'),
+            geo_fn = os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}.npy')
+            obj = self.load_object(os.path.join(self.datadir, common_path + '_hier', partnet_id + '.json'),
                                    load_geo=self.load_geo, geo_fn=geo_fn)
 
         data_feats = ()
@@ -98,9 +102,8 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
 
         voxel_path = os.path.join(self.shapenet_voxelized_path, partnet_id, 'full_vox.colored.pkl')
         shape_sdf = torch.FloatTensor(pickle.load(open(voxel_path, 'rb'))['sdf'])
-        shape_mask = torch.FloatTensor(np.load(os.path.join(common_path+'_geo', f'{partnet_id}_full.npy')))
-        # shape_mask = torch.FloatTensor(np.load(os.path.join(common_path + '_corrected_geo', f'{partnet_scannet_id}_full.npy')))
-        scannet_geo = torch.FloatTensor(np.load(os.path.join(common_path+'_scannet_geo_mlcvnet_finaltable', f'{partnet_scannet_id}.npy')))
+        shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}_full.npy')))
+        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet_geo', f'{partnet_scannet_id}.npy')))
 
         output = (scannet_geo, shape_sdf, shape_mask, data_feats, partnet_id, 0, tokens)
 
@@ -108,11 +111,6 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
 
     def __len__(self):
         return len(self.object_names)
-
-    def get_anno_id(self, anno_id):
-        obj = self.load_object(os.path.join(self.root, anno_id + '.json'),
-                               load_geo=self.load_geo)
-        return obj
 
     @staticmethod
     def load_object(fn, load_geo=False, geo_fn=None):
@@ -177,7 +175,7 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
         return obj
 
 
-def generate_scannet_allshapes_datasets(root=None, partnet_to_dirs_path=None,
+def generate_scannet_allshapes_datasets(datadir=None, dataset=None, partnet_to_dirs_path=None,
                               train_samples='train.txt', val_samples='val.txt',
                               data_features=('object',), load_geo=True,
                               shapenet_voxelized_path=None,
@@ -187,9 +185,9 @@ def generate_scannet_allshapes_datasets(root=None, partnet_to_dirs_path=None,
 
     Dataset = VoxelisedScanNetAllShapesGNNDataset
 
-    train_dataset = Dataset(root, partnet_to_dirs_path, train_samples, data_features, load_geo,
+    train_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, train_samples, data_features, load_geo,
                             shapenet_voxelized_path=shapenet_voxelized_path)
-    val_dataset = Dataset(root, partnet_to_dirs_path, val_samples, data_features, load_geo,
+    val_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, val_samples, data_features, load_geo,
                           shapenet_voxelized_path=shapenet_voxelized_path)
 
     return {
@@ -200,9 +198,10 @@ def generate_scannet_allshapes_datasets(root=None, partnet_to_dirs_path=None,
 
 class VoxelisedScanNetAllShapesRotGNNDataset(VoxelisedScanNetAllShapesGNNDataset):
 
-    def __init__(self, root, partnet_to_dirs_path, object_list, data_features, load_geo=False,
+    def __init__(self, datadir, dataset, partnet_to_dirs_path, object_list, data_features, load_geo=False,
                  shapenet_voxelized_path=None):
-        self.root = root
+        self.datadir = datadir
+        self.dataset = dataset
         self.data_features = data_features
         self.load_geo = load_geo
         self.shapenet_voxelized_path = shapenet_voxelized_path
@@ -211,7 +210,7 @@ class VoxelisedScanNetAllShapesRotGNNDataset(VoxelisedScanNetAllShapesGNNDataset
             self.partnet_to_dirs = pickle.load(f)
 
         if isinstance(object_list, str):
-            with open(os.path.join(self.root, object_list), 'r') as f:
+            with open(os.path.join(self.datadir, self.dataset, object_list), 'r') as f:
                 self.object_names = [item.rstrip() for item in f.readlines()]
         else:
             self.object_names = object_list
@@ -223,11 +222,9 @@ class VoxelisedScanNetAllShapesRotGNNDataset(VoxelisedScanNetAllShapesGNNDataset
         rotation = tokens[4]
         common_path = self.partnet_to_dirs[partnet_id]
         if 'object' in self.data_features:
-            geo_fn = os.path.join(common_path+'_geo_8rot', partnet_id + f'_{rotation}.npy')
-            # geo_fn = os.path.join(common_path+'_corrected_geo_8rot', f'{id_without_rotation}_{rotation}.npy')
-            obj = self.load_object(os.path.join(common_path+'_hier', partnet_id + '.json'),
-                                   load_geo=self.load_geo, rotation=rotation,
-                                   geo_fn=geo_fn)
+            geo_fn = os.path.join(self.datadir, common_path + '_geo_8rot', partnet_id + f'_{rotation}.npy')
+            obj = self.load_object(os.path.join(self.datadir, common_path + '_hier', partnet_id + '.json'),
+                                   load_geo=self.load_geo, geo_fn=geo_fn)
 
         data_feats = ()
         for feat in self.data_features:
@@ -240,16 +237,15 @@ class VoxelisedScanNetAllShapesRotGNNDataset(VoxelisedScanNetAllShapesGNNDataset
 
         voxel_path = os.path.join(self.shapenet_voxelized_path, partnet_id, 'full_vox.colored.pkl')
         shape_sdf = torch.FloatTensor(pickle.load(open(voxel_path, 'rb'))['sdf'])
-        shape_mask = torch.FloatTensor(np.load(os.path.join(common_path+'_geo_8rot', f'{partnet_id}_full_{rotation}.npy')))
-        # shape_mask = torch.FloatTensor(np.load(os.path.join(common_path + '_corrected_geo_8rot', f'{id_without_rotation}_full_{rotation}.npy')))
-        scannet_geo = torch.FloatTensor(np.load(os.path.join(common_path+'_scannet_geo_mlcvnet_8rot', f'{partnet_scannet_id}.npy')))
+        shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo_8rot', f'{partnet_id}_full_{rotation}.npy')))
+        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet_geo_8rot', f'{partnet_scannet_id}.npy')))
 
         output = (scannet_geo, shape_sdf, shape_mask, data_feats, partnet_id, int(rotation), tokens)
 
         return output
 
 
-def generate_scannet_allshapes_rot_datasets(root=None, partnet_to_dirs_path=None,
+def generate_scannet_allshapes_rot_datasets(datadir=None, dataset=None, partnet_to_dirs_path=None,
                               train_samples='train.txt', val_samples='val.txt',
                               data_features=('object',), load_geo=True,
                               shapenet_voxelized_path=None,
@@ -259,9 +255,9 @@ def generate_scannet_allshapes_rot_datasets(root=None, partnet_to_dirs_path=None
 
     Dataset = VoxelisedScanNetAllShapesRotGNNDataset
 
-    train_dataset = Dataset(root, partnet_to_dirs_path, train_samples, data_features, load_geo,
+    train_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, train_samples, data_features, load_geo,
                             shapenet_voxelized_path=shapenet_voxelized_path)
-    val_dataset = Dataset(root, partnet_to_dirs_path, val_samples, data_features, load_geo,
+    val_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, val_samples, data_features, load_geo,
                           shapenet_voxelized_path=shapenet_voxelized_path)
 
     return {
