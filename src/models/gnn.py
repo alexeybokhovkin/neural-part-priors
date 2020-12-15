@@ -660,8 +660,6 @@ class RecursiveDecoder(nn.Module):
                     child_gt_sem_vectors += [child_gt_sem_vector]
                     child_gt_sem_classes[j] = child_node.get_semantic_id()
                 child_gt_sem_classes = child_gt_sem_classes.long()
-                child_gt_sem_vectors = torch.cat(child_gt_sem_vectors, dim=0)
-                child_pred_sem_vectors = torch.sigmoid(child_sem_logits)[0]
 
                 child_sem_logits_tiled = child_sem_logits[0].unsqueeze(dim=0).repeat(num_gt, 1, 1)
                 child_gt_sem_classes_tiled = child_gt_sem_classes.unsqueeze(dim=1).repeat(1, num_pred).to(cuda_device)
