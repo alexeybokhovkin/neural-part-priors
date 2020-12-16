@@ -63,7 +63,7 @@ class NodeDecoder(nn.Module):
 
         self.part_decoder = PartDecoder(geo_feat_len, dec_in_f_maps, dec_out_f_maps, num_convs_per_block,
                                         layer_order, num_groups, scale_factors, dec_conv_kernel_sizes,
-                                        dec_strides, dec_paddings, encode_mask)
+                                        dec_strides, dec_paddings)
 
         self.mlp = nn.Linear(node_feat_len, geo_feat_len)
         self.activation = nn.Sigmoid()
@@ -86,12 +86,13 @@ class NodeDecoderPrior(nn.Module):
 
     def __init__(self, geo_feat_len, node_feat_len, dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order,
                  num_groups, scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings, encode_mask, shape_priors,
+                 output_paddings, joins,
                  **kwargs):
         super(NodeDecoderPrior, self).__init__()
 
         self.part_decoder = PartDecoder(geo_feat_len, dec_in_f_maps, dec_out_f_maps, num_convs_per_block,
                                         layer_order, num_groups, scale_factors, dec_conv_kernel_sizes,
-                                        dec_strides, dec_paddings, encode_mask)
+                                        dec_strides, dec_paddings, encode_mask, output_paddings, joins)
 
         self.mlp = nn.Linear(node_feat_len, geo_feat_len)
         self.activation = nn.Sigmoid()
@@ -103,7 +104,7 @@ class NodeDecoderPrior(nn.Module):
 
         self.softmax_layer = nn.Softmax()
 
-    def forward(self, x, mask_code=None, priors=None):
+    def forward(self, x, mask_code=None, mask_feature=None, priors=None):
         geo_feat = self.mlp(x)
         if mask_code is not None:
             geo_feat = torch.cat([geo_feat, mask_code.repeat(geo_feat.shape[0], 1)], dim=1)
@@ -133,7 +134,7 @@ class PriorRefiner(nn.Module):
         self.conv4 = nn.Conv3d(8, 1, (1, 1, 1), padding=(0, 0, 0), stride=(1, 1, 1))
         self.activation = nn.Sigmoid()
 
-    def forward(self, x, scan_geo=None):
+    def forward(self, x, scan_geo=None, node_latent=None, encoder_features=None):
 
         y = torch.cat([x, scan_geo], dim=1)
 
@@ -186,16 +187,23 @@ class MasksRefiner(nn.Module):
 class PartDecoder(nn.Module):
 
     def __init__(self, feat_len, dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order,
-                 num_groups, scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings):
+                 num_groups, scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings,
+                 encode_mask=False, output_paddings=None, joins=None):
         super(PartDecoder, self).__init__()
 
-        self.geo_decoder = ConvDecoder(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups,
-                                       scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings)
+        self.encode_mask = encode_mask
 
-    def forward(self, x):
+        self.geo_decoder = ConvDecoder(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups,
+                                       scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings, output_paddings,
+                                       joins)
+
+    def forward(self, x, mask_feature=None):
 
         x = x[..., None, None, None]
-        x = self.geo_decoder(x)
+        if self.encode_mask:
+            x = self.geo_decoder(x, mask_feature)
+        else:
+            x = self.geo_decoder(x)
 
         return x
 
@@ -346,9 +354,10 @@ class RecursiveDecoder(nn.Module):
                  dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups, scale_factors,
                  dec_conv_kernel_sizes, dec_strides, dec_paddings, device,
                  edge_symmetric_type, num_iterations, edge_type_num, enc_hier, split_subnetworks, loss_children,
-                 split_enc_children, encode_mask, shape_priors, priors_path=None, priors_dict_path=None,
+                 split_enc_children, encode_mask, shape_priors, priors_path=None, parts_dict=None,
                  enc_in_f_maps=None, enc_out_f_maps=None, enc_strides=None, enc_paddings=None,
-                 enc_conv_kernel_sizes=None, last_pooling_size=None):
+                 enc_conv_kernel_sizes=None, last_pooling_size=None, output_paddings=None, joins=None,
+                 base=None):
         super(RecursiveDecoder, self).__init__()
 
         self.label_to_id = {
@@ -359,8 +368,7 @@ class RecursiveDecoder(nn.Module):
             'trash_can': 4
         }
 
-        with open(os.path.join(priors_dict_path), 'rb') as f:
-            self.parts_dict = pickle.load(f)
+        self.parts_dict = parts_dict
 
         self.priors = {}
         for rot in range(8):
@@ -372,7 +380,6 @@ class RecursiveDecoder(nn.Module):
             prior_id = int(path.split('_')[0])
             self.priors[rot][prior_id] = p
 
-        
         self.edge_types = ['ADJ', 'SYM']
         self.device = device
         self.split_subnetworks = split_subnetworks
@@ -381,11 +388,10 @@ class RecursiveDecoder(nn.Module):
         self.split_enc_children = split_enc_children
 
         self.latent_decoder = LatentDecoder(feature_size, hidden_size)
-        self.node_decoder_prior = NodeDecoderPrior(geo_feature_size, feature_size, dec_in_f_maps, dec_out_f_maps, num_convs_per_block,
-                                                   layer_order, num_groups, scale_factors,
-                                                   dec_conv_kernel_sizes, dec_strides, dec_paddings, encode_mask, shape_priors,
-                                                   enc_in_f_maps, enc_out_f_maps, enc_strides, enc_paddings,
-                                                   enc_conv_kernel_sizes, last_pooling_size)
+        self.node_decoder_prior = NodeDecoderPrior(geo_feature_size, feature_size, dec_in_f_maps, dec_out_f_maps,
+                                                   num_convs_per_block, layer_order, num_groups, scale_factors,
+                                                   dec_conv_kernel_sizes, dec_strides, dec_paddings, encode_mask,
+                                                   shape_priors, output_paddings, joins)
         self.prior_refiner = PriorRefiner()
         self.masks_refiner = MasksRefiner()
 
@@ -403,7 +409,6 @@ class RecursiveDecoder(nn.Module):
         else:
             self.leaf_classifiers = []
             self.child_decoders = []
-            # self.node_decoders = []
             for i in range(4):
                 self.leaf_classifiers += [LeafClassifier(feature_size, hidden_size)]
                 self.child_decoders += [GNNChildDecoder(feature_size, hidden_size,
@@ -413,7 +418,6 @@ class RecursiveDecoder(nn.Module):
             self.child_decoders = nn.ModuleList(self.child_decoders)
 
         self.softmax_layer = nn.Softmax()
-
 
         self.mseLoss = nn.MSELoss(reduction='none')
         self.voxelLoss = nn.BCELoss(reduction='none')
@@ -620,23 +624,11 @@ class RecursiveDecoder(nn.Module):
             loss_dict['root_cls'] = root_cls_loss
             loss_dict['rotation'] = rotation_cls_loss
 
-            if self.loss_children:
-                num_children_pred = self.num_children_classifier(node_latent)
-                gt_children = torch.zeros(1, dtype=torch.long)
-                gt_children[0] = len(gt_node.children)
-                gt_children = gt_children.to("cuda:{}".format(cuda_device))
-                num_children_loss = self.childrenCELoss(num_children_pred, gt_children)
-
-                loss_dict['num_children'] = num_children_loss
             return loss_dict, geo_mask, geo_mask, gt_geo, geo_feature, S_prior
         else:
             loss_dict = {}
             child_feats, child_sem_logits, child_exists_logits, edge_exists_logits = \
                 self.child_decoders[clip_level](node_latent)
-            if self.split_enc_children and level == 0:
-                children_roots = torch.cat(children_roots)
-                latent_loss = self.mseLoss(children_roots[None, ...], child_feats).mean()
-                loss_dict['split_enc_children'] = latent_loss
 
             all_geo = []
             all_gt_geo = []
@@ -769,8 +761,6 @@ class RecursiveDecoder(nn.Module):
                 child_exists_loss = child_exists_loss + child_losses['exists']
                 semantic_loss = semantic_loss + child_losses['semantic']
                 edge_exists_loss = edge_exists_loss + child_losses['edge_exists']
-                if self.loss_children:
-                    num_children_loss = num_children_loss + child_losses['num_children']
 
             loss_dict['leaf'] = is_leaf_loss.view((1))
             loss_dict['geo'] = geo_loss.view((1))
@@ -780,7 +770,5 @@ class RecursiveDecoder(nn.Module):
             loss_dict['edge_exists'] = edge_exists_loss.view((1))
             loss_dict['root_cls'] = root_cls_loss.view((1))
             loss_dict['rotation'] = rotation_cls_loss.view((1))
-            if self.loss_children:
-                loss_dict['num_children'] = num_children_loss.view((1))
 
             return loss_dict, torch.cat(all_geo, dim=0), torch.cat(all_leaf_geo, dim=0), torch.cat(all_leaf_S_priors, dim=0)

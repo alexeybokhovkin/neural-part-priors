@@ -1,8 +1,11 @@
+import os
+import pickle
+
 import torch
 import torch.nn as nn
 
 from ..buildingblocks import FeatureVector, ConvEncoder, ConvDecoder
-from gnn import RecursiveDecoder
+from .gnn import RecursiveDecoder
 
 
 class GeoEncoder(nn.Module):
@@ -46,11 +49,10 @@ class HierarchicalDecoder(nn.Module):
                  num_convs_per_block=1, scale_factors=None, enc_hier=False,
                  recursive_feat_size=256, geo_feature_size=256, recursive_hidden_size=256,
                  max_depth=10, max_child_num=10, device='gpu', edge_symmetric_type='avg', num_iterations=0,
-                 edge_type_num=0,
-                 split_subnetworks=False, loss_children=False, split_enc_children=False, encode_mask=False,
-                 shape_priors=False, priors_path=None, enc_in_f_maps=None, enc_out_f_maps=None, enc_strides=1,
-                 enc_paddings=1,
-                 enc_conv_kernel_sizes=3, last_pooling_size=1, enc_number_of_fmaps=5, priors_dict_path=None,
+                 edge_type_num=0, split_subnetworks=False, loss_children=False, split_enc_children=False,
+                 encode_mask=False, shape_priors=False, priors_path=None, enc_in_f_maps=None, enc_out_f_maps=None,
+                 enc_strides=1, enc_paddings=1, enc_conv_kernel_sizes=3, last_pooling_size=1, enc_number_of_fmaps=5,
+                 parts_to_ids_path=None, base=None, output_paddings=None, joins=None,
                  **kwargs):
 
         super(HierarchicalDecoder, self).__init__()
@@ -70,15 +72,19 @@ class HierarchicalDecoder(nn.Module):
         if not isinstance(enc_paddings, list):
             enc_paddings = [enc_paddings] * enc_number_of_fmaps
 
+        with open(os.path.join(parts_to_ids_path), 'rb') as f:
+            parts_dict = pickle.load(f)
+
         self.recursive_decoder = RecursiveDecoder(recursive_feat_size, geo_feature_size, recursive_hidden_size,
                                                   max_child_num, dec_in_f_maps, dec_out_f_maps, num_convs_per_block,
                                                   layer_order, num_groups, scale_factors, dec_conv_kernel_sizes,
                                                   dec_strides, dec_paddings, device, edge_symmetric_type,
                                                   num_iterations, edge_type_num, enc_hier, split_subnetworks,
                                                   loss_children, split_enc_children, encode_mask, shape_priors,
-                                                  priors_path, priors_dict_path, enc_in_f_maps, enc_out_f_maps,
+                                                  priors_path, parts_dict, enc_in_f_maps, enc_out_f_maps,
                                                   enc_strides, enc_paddings,
-                                                  enc_conv_kernel_sizes, last_pooling_size)
+                                                  enc_conv_kernel_sizes, last_pooling_size,
+                                                  base=base, output_paddings=output_paddings, joins=joins)
 
     def forward(self, x_root, mask_code=None, mask_feature=None, scan_geo=None, full_label=None, encoder_features=None,
                 rotation=None):

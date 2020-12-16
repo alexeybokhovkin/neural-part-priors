@@ -1,7 +1,8 @@
-import os, sys
+import os
+import sys
 
 from pytorch_lightning import Trainer
-from pytorch_lightning.logging import TensorBoardLogger
+from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from src.utils.config import load_config
@@ -10,7 +11,7 @@ from src.lightning_models.gnn_scannet import GNNPartnetLightning
 
 def main(args):
     config = load_config(args)
-    CHECKPOINTS = os.path.join(config.checkpoint_dir, config.model, config.version, 'checkpoints')
+    CHECKPOINTS = os.path.join(config.base, config.checkpoint_dir, config.model, config.version, 'checkpoints')
     os.makedirs(os.path.join(config.base, config.checkpoint_dir, config.model, config.version), exist_ok=True)
     os.makedirs(CHECKPOINTS, exist_ok=True)
 

@@ -2,8 +2,9 @@ import os
 import json
 from argparse import Namespace
 import random
-import numpy as np
+import gc
 
+import numpy as np
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR, MultiStepLR
@@ -36,7 +37,9 @@ class GNNPartnetLightning(pl.LightningModule):
         self.train_dataset = datasets['train']
         self.val_dataset = datasets['val']
 
-        Tree.load_category_info(config['hierarchies'])
+        self.config['parts_to_ids_path'] = os.path.join(config['datadir'], config['dataset'], config['parts_to_ids_path'])
+
+        Tree.load_category_info(os.path.join(config['datadir'], config['dataset']))
         self.encoder = GeoEncoder(**config)
         self.decoder = HierarchicalDecoder(**config)
         if self.config['encode_mask']:
@@ -49,7 +52,7 @@ class GNNPartnetLightning(pl.LightningModule):
         torch.backends.cudnn.enabled = False
         torch.backends.cudnn.deterministic = True
 
-        with open(os.path.join(config['checkpoint_dir'], config['model'], config['version'], 'config.json'), 'w') as f:
+        with open(os.path.join(config['base'], config['checkpoint_dir'], config['model'], config['version'], 'config.json'), 'w') as f:
             json.dump(self.config, f)
 
     def configure_optimizers(self):
@@ -96,22 +99,22 @@ class GNNPartnetLightning(pl.LightningModule):
             object_losses = output[0]
             all_losses += [object_losses]
 
-        losses = {'geo': [],
-                  'geo_prior': [],
-                  'leaf': [],
-                  'exists': [],
-                  'semantic': [],
-                  'latent': [],
-                  'edge_exists': [],
-                  'num_children': [],
-                  'root_cls': [],
-                  'rotation': []}
+        losses = {'geo': 0,
+                  'geo_prior': 0,
+                  'leaf': 0,
+                  'exists': 0,
+                  'semantic': 0,
+                  'edge_exists': 0,
+                  'root_cls': 0,
+                  'rotation': 0}
 
         for i, object_losses in enumerate(all_losses):
             for loss_name, loss in object_losses.items():
-                losses[loss_name].append(loss)
+                losses[loss_name] = losses[loss_name] + loss
         for loss_name in losses:
-            losses[loss_name] = torch.mean(losses[loss_name])
+            losses[loss_name] /= len(all_losses)
+
+        del all_losses
 
         return losses
 
@@ -191,7 +194,7 @@ class GNNPartnetLightning(pl.LightningModule):
         return output
 
     def training_step(self, batch, batch_idx):
-        Tree.load_category_info(self.config['hierarchies'])
+        Tree.load_category_info(os.path.join(self.config['datadir'], self.config['dataset']))
 
         batch[0] = [x[None, ...] for x in batch[0]]
         scannet_geos = torch.cat(batch[0]).unsqueeze(dim=1)
@@ -201,56 +204,55 @@ class GNNPartnetLightning(pl.LightningModule):
         partnet_ids = batch[4]
         rotations = batch[5]
 
-        aug_gt_trees = []
-        aug_rotations = []
-        sym_rotation_prob = np.random.uniform(size=1)[0]
-        if sym_rotation_prob >= 0.5:
-            for i in range(len(gt_trees)):
-                aug_gt_trees += [(sym_reflect_tree(gt_trees[i][0]),)]
-                aug_rotations += [(8 - rotations[i]) % 8]
-            aug_scannet_geos = torch.flip(scannet_geos, dims=(-1,))
-            gt_trees = aug_gt_trees
-            scannet_geos = aug_scannet_geos
-            rotations = aug_rotations
+        # aug_gt_trees = []
+        # aug_rotations = []
+        # sym_rotation_prob = np.random.uniform(size=1)[0]
+        # if sym_rotation_prob >= 0.5:
+        #     for i in range(len(gt_trees)):
+        #         aug_gt_trees += [(sym_reflect_tree(gt_trees[i][0]),)]
+        #         aug_rotations += [(8 - rotations[i]) % 8]
+        #     aug_scannet_geos = torch.flip(scannet_geos, dims=(-1,))
+        #     gt_trees = aug_gt_trees
+        #     scannet_geos = aug_scannet_geos
+        #     rotations = aug_rotations
 
         input_batch = tuple([scannet_geos, shape_sdfs, shape_mask, gt_trees, partnet_ids, rotations])
 
         losses = self.forward(input_batch)
-        losses_unweighted = losses.copy()
 
         for key in losses:
             losses[key] *= self.config['loss_weight_' + key]
-        print('rotation:', losses['rotation'])
-        print('root_cls:', losses['root_cls'])
-        print('geo:', losses['geo'])
-        print('geo_prior:', losses['geo_prior'])
-
         total_loss = 0
         for loss in losses.values():
             total_loss += loss
 
+        loss_components = {}
+        for key in losses:
+            loss_components[key] = losses[key].detach()
+        # print('rotation:', losses['rotation'])
+        # print('root_cls:', losses['root_cls'])
+        # print('geo:', losses['geo'])
+        # print('geo_prior:', losses['geo_prior'])
+
+        gc.collect()
+
         return {'loss': total_loss,
-                'train_loss_components': losses,
-                'train_loss_components_unweighted': losses_unweighted}
+                'train_loss_components': loss_components}
 
     def training_epoch_end(self, outputs):
         log = {}
         losses = {}
-        losses_unweighted = {}
         train_loss = torch.tensor(0).type_as(outputs[0]['loss'])
         for key in outputs[0]['loss_components']:
             losses[key] = 0
-            losses_unweighted[key] = 0
 
         for output in outputs:
-            train_loss += output['loss']
+            train_loss += output['loss'].detach().item()
             for key in losses:
-                losses[key] += output['train_loss_components'][key]
-                losses_unweighted[key] += output['train_loss_components_unweighted'][key]
+                losses[key] += output['train_loss_components'][key].detach().item()
         train_loss /= len(outputs)
         for key in losses:
             losses[key] /= len(outputs)
-            losses_unweighted[key] /= len(outputs)
 
         log.update(losses)
         log.update({'loss': train_loss})
@@ -259,8 +261,11 @@ class GNNPartnetLightning(pl.LightningModule):
         for key in losses:
             self.log(key, log[key])
 
+        del outputs, log
+        gc.collect()
+
     def validation_step(self, batch, batch_idx):
-        Tree.load_category_info(self.config['hierarchies'])
+        Tree.load_category_info(os.path.join(self.config['datadir'], self.config['dataset']))
 
         batch[0] = [x[None, ...] for x in batch[0]]
         scannet_geos = torch.cat(batch[0]).unsqueeze(dim=1)
@@ -273,37 +278,37 @@ class GNNPartnetLightning(pl.LightningModule):
         input_batch = tuple([scannet_geos, shape_sdfs, shape_mask, gt_trees, partnet_ids, rotations])
 
         losses = self.forward(input_batch)
-        losses_unweighted = losses.copy()
 
         for key in losses:
             losses[key] *= self.config['loss_weight_' + key]
+
+        loss_components = {}
+        for key in losses:
+            loss_components[key] = losses[key].detach()
 
         total_loss = 0
         for loss_name, loss in losses.items():
             total_loss += loss
 
+        gc.collect()
+
         return {'val_loss': total_loss,
-                'val_loss_components': losses,
-                'val_loss_components_unweighted': losses_unweighted}
+                'val_loss_components': loss_components}
 
     def validation_epoch_end(self, outputs):
         log = {}
         losses = {}
-        losses_unweighted = {}
         val_loss = torch.tensor(0).type_as(outputs[0]['val_loss'])
         for key in outputs[0]['val_loss_components']:
             losses['val_' + key] = 0
-            losses_unweighted['val_' + key] = 0
 
         for output in outputs:
-            val_loss += output['val_loss']
+            val_loss += output['val_loss'].detach().item()
             for key in losses:
-                losses[key] += output['val_loss_components'][key[4:]]
-                losses_unweighted[key] += output['val_loss_components_unweighted'][key[4:]]
+                losses[key] += output['val_loss_components'][key[4:]].detach().item()
         val_loss /= len(outputs)
         for key in losses:
             losses[key] /= len(outputs)
-            losses_unweighted[key] /= len(outputs)
 
         log.update(losses)
         log.update({'val_loss': val_loss})
@@ -311,6 +316,10 @@ class GNNPartnetLightning(pl.LightningModule):
         self.log('val_loss', log['val_loss'])
         for key in losses:
             self.log(key, log[key])
+
+        del outputs, log
+        torch.cuda.empty_cache()
+        gc.collect()
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.config['batch_size'],
