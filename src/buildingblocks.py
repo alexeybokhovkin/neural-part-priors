@@ -249,8 +249,8 @@ class ConvBlock(nn.Module):
 class ConvEncoder(nn.Module):
 
     def __init__(self, enc_in_f_maps=None, enc_out_f_maps=None,
-                 layer_order='crg', num_groups=8, enc_strides=1, enc_paddings=1, enc_conv_kernel_sizes=3,
-                 num_convs_per_block=1, **kwargs):
+                 layer_order=None, num_groups=8, enc_strides=1, enc_paddings=1, enc_conv_kernel_sizes=3,
+                 num_convs_per_block=1, layer_orders=None, **kwargs):
         super(ConvEncoder, self).__init__()
 
         if num_convs_per_block == 1:
@@ -265,12 +265,12 @@ class ConvEncoder(nn.Module):
             if i == 0:
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, apply_pooling=False,
                                     basic_module=basic_module,
-                                    conv_layer_order=layer_order, num_groups=num_groups,
+                                    conv_layer_order=layer_orders[i], num_groups=num_groups,
                                     conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
                                     padding=enc_paddings[i])
             else:
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, basic_module=basic_module,
-                                    conv_layer_order=layer_order, num_groups=num_groups,
+                                    conv_layer_order=layer_orders[i], num_groups=num_groups,
                                     conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
                                     padding=enc_paddings[i])
             encoders.append(encoder)

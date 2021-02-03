@@ -370,6 +370,11 @@ class RecursiveDecoder(nn.Module):
 
         self.parts_dict = parts_dict
 
+        # self.priors = {}
+        # for path in os.listdir(priors_path):
+        #     p = torch.FloatTensor(np.load(os.path.join(priors_path, path)))
+        #     self.priors[int(path.split('.')[0])] = p
+
         self.priors = {}
         for rot in range(8):
             self.priors[rot] = {}
@@ -383,7 +388,6 @@ class RecursiveDecoder(nn.Module):
         self.edge_types = ['ADJ', 'SYM']
         self.device = device
         self.split_subnetworks = split_subnetworks
-        self.loss_children = loss_children
         self.max_child_num = max_child_num
         self.split_enc_children = split_enc_children
 
@@ -398,9 +402,6 @@ class RecursiveDecoder(nn.Module):
         self.root_classifier = NumChildrenClassifier(feature_size, hidden_size, 5)
         self.rotation_classifier = NumChildrenClassifier(feature_size, hidden_size, 8)
 
-        if loss_children:
-            self.num_children_classifier = NumChildrenClassifier(feature_size, hidden_size, max_child_num+1)
-
         if not split_subnetworks:
             self.leaf_classifiers = nn.ModuleList([LeafClassifier(feature_size, hidden_size)])
             self.child_decoders = nn.ModuleList([GNNChildDecoder(feature_size, hidden_size,
@@ -409,7 +410,7 @@ class RecursiveDecoder(nn.Module):
         else:
             self.leaf_classifiers = []
             self.child_decoders = []
-            for i in range(4):
+            for i in range(1):
                 self.leaf_classifiers += [LeafClassifier(feature_size, hidden_size)]
                 self.child_decoders += [GNNChildDecoder(feature_size, hidden_size,
                                                         max_child_num, edge_symmetric_type,
@@ -588,6 +589,7 @@ class RecursiveDecoder(nn.Module):
                 child_sem = int(torch.argmax(child_sem_logit).cpu().detach().numpy())
                 if child_sem > 0:
                     full_part_name = Tree.part_id2name[child_sem]
+                    # prior = self.priors[self.parts_dict[full_part_name]].to(cuda_device)
                     prior = self.priors[pred_rotation][self.parts_dict[full_part_name]].to(cuda_device)
             if child_sem > 0:
                 geo_feat, S_prior = self.node_decoder_prior(node_latent, mask_code, mask_feature, prior)
@@ -698,13 +700,6 @@ class RecursiveDecoder(nn.Module):
             is_leaf_logit = self.leaf_classifiers[clip_level](node_latent)
             is_leaf_loss = self.isLeafLossEstimator(is_leaf_logit,
                                                     is_leaf_logit.new_tensor(gt_node.is_leaf).view(1, -1))
-
-            if self.loss_children:
-                num_children_pred = self.num_children_classifier(node_latent)
-                gt_children = torch.zeros(1, dtype=torch.long)
-                gt_children[0] = len(gt_node.children)
-                gt_children = gt_children.to("cuda:{}".format(cuda_device))
-                num_children_loss = self.childrenCELoss(num_children_pred, gt_children)
 
             # gather information
             child_sem_gt_labels = []

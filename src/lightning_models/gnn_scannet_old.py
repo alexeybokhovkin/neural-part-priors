@@ -34,6 +34,7 @@ class GNNPartnetLightning(pl.LightningModule):
                     self.config[_k] = "null"
 
         datasets = generate_scannet_allshapes_rot_datasets(**config)
+        # datasets = generate_scannet_allshapes_datasets(**config)
         self.train_dataset = datasets['train']
         self.val_dataset = datasets['val']
 
@@ -89,9 +90,6 @@ class GNNPartnetLightning(pl.LightningModule):
                 mask_codes += [None]
                 mask_features += [None]
 
-            if self.config['use_latent_constraint']:
-                loss_latent_constraint += self.encoder.mseLoss(x_root, latents[i][None, ...])
-
             x_roots += [x_root]
 
         for i, x_root in enumerate(x_roots):
@@ -115,14 +113,9 @@ class GNNPartnetLightning(pl.LightningModule):
                   'root_cls': 0,
                   'rotation': 0}
 
-        if self.config['use_latent_constraint']:
-            losses['latent_constraint'] = loss_latent_constraint
-
         for i, object_losses in enumerate(all_losses):
             for loss_name, loss in object_losses.items():
                 losses[loss_name] = losses[loss_name] + loss
-        for loss_name in losses:
-            losses[loss_name] /= len(all_losses)
 
         del all_losses
 
@@ -195,8 +188,6 @@ class GNNPartnetLightning(pl.LightningModule):
         for i, object_losses in enumerate(all_losses):
             for loss_name, loss in object_losses.items():
                 losses[loss_name].append(loss)
-        for loss_name in losses:
-            losses[loss_name] = torch.mean(losses[loss_name])
 
         output = [predicted_trees, x_roots, losses, all_leaves_geos, all_priors, pred_rotations]
         output = tuple(output)
@@ -215,18 +206,6 @@ class GNNPartnetLightning(pl.LightningModule):
         rotations = batch[5]
         latents = batch[6]
 
-        # aug_gt_trees = []
-        # aug_rotations = []
-        # sym_rotation_prob = np.random.uniform(size=1)[0]
-        # if sym_rotation_prob >= 0.5:
-        #     for i in range(len(gt_trees)):
-        #         aug_gt_trees += [(sym_reflect_tree(gt_trees[i][0]),)]
-        #         aug_rotations += [(8 - rotations[i]) % 8]
-        #     aug_scannet_geos = torch.flip(scannet_geos, dims=(-1,))
-        #     gt_trees = aug_gt_trees
-        #     scannet_geos = aug_scannet_geos
-        #     rotations = aug_rotations
-
         input_batch = tuple([scannet_geos, shape_sdfs, shape_mask, gt_trees, partnet_ids, rotations, latents])
 
         losses = self.forward(input_batch)
@@ -240,14 +219,11 @@ class GNNPartnetLightning(pl.LightningModule):
         loss_components = {}
         for key in losses:
             loss_components[key] = losses[key].detach()
-
-        print()
         print('rotation:', losses['rotation'])
         print('root_cls:', losses['root_cls'])
         print('semantic:', losses['semantic'])
         print('geo:', losses['geo'])
         print('geo_prior:', losses['geo_prior'])
-        print()
 
         gc.collect()
 

@@ -6,7 +6,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from src.utils.config import load_config
-from src.lightning_models.gnn_scannet import GNNPartnetLightning
+from src.lightning_models.gnn_scannet_old import GNNPartnetLightning
 
 
 def main(args):

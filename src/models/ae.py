@@ -6,7 +6,7 @@ from ..buildingblocks import ConvEncoder, ConvDecoder
 class AE_Encoder(nn.Module):
 
     def __init__(self, enc_in_f_maps=None, enc_out_f_maps=None,
-                 layer_order='crg', num_groups=8, enc_strides=1, enc_paddings=1,
+                 layer_orders=None, num_groups=8, enc_strides=1, enc_paddings=1,
                  enc_conv_kernel_sizes=3, num_convs_per_block=1, device='gpu', last_pooling=True,
                  **kwargs):
         super(AE_Encoder, self).__init__()
@@ -22,7 +22,7 @@ class AE_Encoder(nn.Module):
         if not isinstance(enc_paddings, list):
             enc_paddings = [enc_paddings] * enc_number_of_fmaps
 
-        self.encoder = ConvEncoder(enc_in_f_maps, enc_out_f_maps, layer_order, num_groups,
+        self.encoder = ConvEncoder(enc_in_f_maps, enc_out_f_maps, layer_orders, num_groups,
                                    enc_strides, enc_paddings, enc_conv_kernel_sizes, num_convs_per_block)
 
     def forward(self, x):

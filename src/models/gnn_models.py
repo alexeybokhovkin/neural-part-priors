@@ -13,7 +13,7 @@ class GeoEncoder(nn.Module):
                  layer_order='crg', num_groups=8, enc_strides=1, enc_paddings=1, enc_number_of_fmaps=5,
                  enc_conv_kernel_sizes=3, num_convs_per_block=1, last_pooling_size=1,
                  device='gpu', recursive_feat_size=256, recursive_hidden_size=256, variational=False,
-                 last_pooling=True, **kwargs):
+                 last_pooling=True, layer_orders=None, **kwargs):
 
         super(GeoEncoder, self).__init__()
 
@@ -28,7 +28,8 @@ class GeoEncoder(nn.Module):
             enc_paddings = [enc_paddings] * enc_number_of_fmaps
 
         self.voxel_encoder = ConvEncoder(enc_in_f_maps, enc_out_f_maps, layer_order, num_groups,
-                                         enc_strides, enc_paddings, enc_conv_kernel_sizes, num_convs_per_block)
+                                         enc_strides, enc_paddings, enc_conv_kernel_sizes, num_convs_per_block,
+                                         layer_orders)
         self.shape_feature_vector = FeatureVector(last_pooling_size, pooling=True)
 
         self.mseLoss = nn.MSELoss()
@@ -127,6 +128,7 @@ class GeoDecoder(nn.Module):
                                         output_paddings, joins)
 
         self.voxelLoss = nn.BCELoss()
+        self.mseLoss = nn.MSELoss()
 
     def forward(self, x_root, encoder_feature=None):
         x_root = x_root[..., None, None, None]
@@ -137,6 +139,12 @@ class GeoDecoder(nn.Module):
     def loss(self, pred, gt):
         pred = torch.sigmoid(pred)
         loss = self.voxelLoss(pred, gt)
+        avg_loss = loss.mean()
+
+        return avg_loss
+
+    def mse_loss(self, pred, gt):
+        loss = self.mseLoss(pred, gt)
         avg_loss = loss.mean()
 
         return avg_loss
