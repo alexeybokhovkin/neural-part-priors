@@ -345,20 +345,21 @@ class DeconvBlock(nn.Module):
     def forward(self, x, feature=None):
 
         # print('Input dec:', x.shape)
+
+        x_feature = self.upsample(x)
+        # print('After up:', x.shape)
+        x = self.basic_module(x_feature)
+        # print('After conv:', x.shape)
         if self.join == 1:
             x = x + feature
         elif self.join == 2:
             # print('Feat:', feature.shape)
+            # print(x.shape)
             x = torch.cat([x, feature], dim=1)
         # print('After join:', x.shape)
-
-        x = self.upsample(x)
-        # print('After up:', x.shape)
-        x = self.basic_module(x)
-        # print('After conv:', x.shape)
         # print()
 
-        return x
+        return x, x_feature
 
 
 class ConvDecoder(nn.Module):
@@ -385,6 +386,8 @@ class ConvDecoder(nn.Module):
                                   scale_factor=scale_factors[i], kernel_size=kernel_sizes[i],
                                   stride=strides[i], padding=paddings[i], join=joins[i],
                                   output_padding=output_paddings[i])
+            if i == 0:
+                decoder = nn.Identity()
 
             decoders.append(decoder)
         self.decoders = nn.ModuleList(decoders)
@@ -395,13 +398,20 @@ class ConvDecoder(nn.Module):
                                               padding=0)
 
     def forward(self, x, features=None):
+        x_features = []
+
         for i, decoder in enumerate(self.decoders):
-            feature = features[i] if features else None
-            x = decoder(x, feature)
+            if i >= 1:
+                if i >= len(features) or not features:
+                    feature = None
+                else:
+                    feature = features[i]
+                x, x_feature = decoder(x, feature)
+                x_features.append(x_feature)
         if self.last_conv:
             x = self.decoder_last_conv(x)
 
-        return x
+        return x, x_features
 
 
 class FeatureVector(nn.Module):

@@ -94,6 +94,18 @@ class Tree(object):
 
             return self
 
+        def detach(self):
+            for edge in self.edges:
+                if 'params' in edge:
+                    edge['params'].detach()
+            if self.geo is not None:
+                self.geo = self.geo.detach()
+
+            for child_node in self.children:
+                child_node.detach()
+
+            return self
+
         def _to_str(self, level, pid, detailed=False):
             out_str = '  |' * (level - 1) + '  |>' * (level > 0) + str(pid) + ' ' + self.label + (
                 ' [LEAF] ' if self.is_leaf else '    ') + '{' + str(self.part_id) + '}'
@@ -233,6 +245,10 @@ class Tree(object):
 
     def to(self, device):
         self.root = self.root.to(device)
+        return self
+
+    def detach(self):
+        self.root = self.root.detach()
         return self
 
     def __str__(self):

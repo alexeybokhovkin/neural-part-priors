@@ -65,13 +65,21 @@ def generate_partnet_allshapes_datasets(datadir=None, dataset=None, partnet_to_d
 class VoxelisedScanNetAllShapesGNNDataset(Dataset):
 
     def __init__(self, datadir, dataset, partnet_to_dirs_path, object_list, data_features, load_geo=False,
-                 shapenet_voxelized_path=None):
+                 shapenet_voxelized_path=None, latent_constraint_path=None):
         self.datadir = datadir
         self.dataset = dataset
         self.data_features = data_features
         self.load_geo = load_geo
         self.shapenet_voxelized_path = shapenet_voxelized_path
         self.partnet_to_dirs_path = os.path.join(datadir, dataset, partnet_to_dirs_path)
+        self.latent_constraint_path = latent_constraint_path
+
+        # if self.latent_constraint_path:
+        #     with open(self.latent_constraint_path, 'rb') as f:
+        #         self.latents = pickle.load(f)
+        # else:
+        #     self.latents = None
+        self.latents = None
 
         with open(self.partnet_to_dirs_path, 'rb') as f:
             self.partnet_to_dirs = pickle.load(f)
@@ -104,7 +112,7 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
         voxel_path = os.path.join(self.shapenet_voxelized_path, partnet_id, 'full_vox.colored.pkl')
         shape_sdf = torch.zeros((32, 32, 32))
         shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}_full.npy')))
-        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet_geo', f'{partnet_scannet_id}.npy')))
+        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id}.npy')))
 
         output = (scannet_geo, shape_sdf, shape_mask, data_feats, partnet_id, 0, tokens)
 
@@ -180,6 +188,7 @@ def generate_scannet_allshapes_datasets(datadir=None, dataset=None, partnet_to_d
                               train_samples='train.txt', val_samples='val.txt',
                               data_features=('object',), load_geo=True,
                               shapenet_voxelized_path=None,
+                              latent_constraint_path=None,
                               **kwargs):
     if isinstance(data_features, str):
         data_features = [data_features]
@@ -187,9 +196,9 @@ def generate_scannet_allshapes_datasets(datadir=None, dataset=None, partnet_to_d
     Dataset = VoxelisedScanNetAllShapesGNNDataset
 
     train_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, train_samples, data_features, load_geo,
-                            shapenet_voxelized_path=shapenet_voxelized_path)
+                            shapenet_voxelized_path=shapenet_voxelized_path, latent_constraint_path=latent_constraint_path)
     val_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, val_samples, data_features, load_geo,
-                          shapenet_voxelized_path=shapenet_voxelized_path)
+                          shapenet_voxelized_path=shapenet_voxelized_path, latent_constraint_path=latent_constraint_path)
 
     return {
         'train': train_dataset,
@@ -274,7 +283,7 @@ class VoxelisedScanNetAllShapesGNNDatasetContrastive(VoxelisedScanNetAllShapesGN
         partnet_scannet_id = self.object_names[index]
         tokens = partnet_scannet_id.split('_')
         partnet_id = tokens[0]
-        common_path = self.partnet_to_dirs[partnet_id]
+        common_path = self.partnet_to_dirs[partnet_id].split('/')[-1]
         if 'object' in self.data_features:
             geo_fn = os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}.npy')
             obj = self.load_object(os.path.join(self.datadir, common_path+'_hier', partnet_id + '.json'),
@@ -292,7 +301,7 @@ class VoxelisedScanNetAllShapesGNNDatasetContrastive(VoxelisedScanNetAllShapesGN
         voxel_path = os.path.join(self.shapenet_voxelized_path, partnet_id, 'full_vox.colored.pkl')
         shape_sdf = torch.zeros((32, 32, 32))
         shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}_full.npy')))
-        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet_geo', f'{partnet_scannet_id}.npy')))
+        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id}.npy')))
 
         pos_idxes = [i for i, x in enumerate(self.object_names) if x.split('_')[0] == partnet_id]
 
@@ -300,7 +309,7 @@ class VoxelisedScanNetAllShapesGNNDatasetContrastive(VoxelisedScanNetAllShapesGN
         partnet_scannet_id_pos = self.object_names[pos_idx]
         partnet_id_pos = self.object_names[pos_idx].split("_")[0]
 
-        scannet_geo_pos = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet_geo', f'{partnet_scannet_id_pos}.npy')))
+        scannet_geo_pos = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id_pos}.npy')))
         shape_mask_pos = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id_pos}_full.npy')))
         if 'object' in self.data_features:
             geo_fn = os.path.join(self.datadir, common_path + '_geo', f'{partnet_id_pos}.npy')
@@ -315,7 +324,12 @@ class VoxelisedScanNetAllShapesGNNDatasetContrastive(VoxelisedScanNetAllShapesGN
             else:
                 assert False, 'ERROR: unknown feat type %s!' % feat
 
-        output = (scannet_geo, shape_sdf, shape_mask, data_feats, partnet_id, 0, tokens, 0,
+        if self.latents:
+            latent = torch.FloatTensor(self.latents[partnet_id])[None, ...]
+        else:
+            latent = 0
+
+        output = (scannet_geo, shape_sdf, shape_mask, data_feats, partnet_id, 0, tokens, latent,
                   scannet_geo_pos, shape_mask_pos, data_feats_pos)
 
         return output
@@ -324,7 +338,7 @@ class VoxelisedScanNetAllShapesGNNDatasetContrastive(VoxelisedScanNetAllShapesGN
 def generate_scannet_allshapes_contrastive_datasets(datadir=None, dataset=None, partnet_to_dirs_path=None,
                               train_samples='train.txt', val_samples='val.txt',
                               data_features=('object',), load_geo=True,
-                              shapenet_voxelized_path=None,
+                              shapenet_voxelized_path=None, latent_constraint_path=None,
                               **kwargs):
     if isinstance(data_features, str):
         data_features = [data_features]
@@ -332,9 +346,9 @@ def generate_scannet_allshapes_contrastive_datasets(datadir=None, dataset=None, 
     Dataset = VoxelisedScanNetAllShapesGNNDatasetContrastive
 
     train_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, train_samples, data_features, load_geo,
-                            shapenet_voxelized_path=shapenet_voxelized_path)
+                            shapenet_voxelized_path=shapenet_voxelized_path, latent_constraint_path=latent_constraint_path)
     val_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, val_samples, data_features, load_geo,
-                          shapenet_voxelized_path=shapenet_voxelized_path)
+                          shapenet_voxelized_path=shapenet_voxelized_path, latent_constraint_path=latent_constraint_path)
 
     return {
         'train': train_dataset,

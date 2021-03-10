@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import numpy as np
+import gc
 
 
 class NTXentLoss(torch.nn.Module):
@@ -96,17 +97,18 @@ class NTXentLossClean(torch.nn.Module):
 
         for i, zi in enumerate(zis):
             negative_similarities = []
-            zi_ = zi[None, ...]
-            for j, zj in enumerate(zjs):
-                zj_ = zj[None, ...]
-                if i != j and partnet_ids[i] != partnet_ids[j]:
-                    negative_similarities += [self.similarity(zi_, zj_) / self.temperature]
-                else:
-                    positive_similarity = self.similarity(zi_, zj_) / self.temperature
-            for k, zk in enumerate(zis):
-                zk_ = zk[None, ...]
-                if k != i and partnet_ids[i] != partnet_ids[k]:
-                    negative_similarities += [self.similarity(zi_, zk_) / self.temperature]
+            with torch.no_grad():
+                zi_ = zi[None, ...]
+                for j, zj in enumerate(zjs):
+                    zj_ = zj[None, ...]
+                    if i != j and partnet_ids[i] != partnet_ids[j]:
+                        negative_similarities += [self.similarity(zi_, zj_) / self.temperature]
+                    else:
+                        positive_similarity = self.similarity(zi_, zj_) / self.temperature
+                for k, zk in enumerate(zis):
+                    zk_ = zk[None, ...]
+                    if k != i and partnet_ids[i] != partnet_ids[k]:
+                        negative_similarities += [self.similarity(zi_, zk_) / self.temperature]
 
             negative_similarities = [positive_similarity] + negative_similarities
 
@@ -114,6 +116,70 @@ class NTXentLossClean(torch.nn.Module):
             loss = self.criterion(torch.cat(negative_similarities)[None, ...], labels)
 
             final_loss += loss
+
+            labels = labels.to('cpu')
+            del labels
+
+        del negative_similarities, positive_similarity
+        gc.collect()
+
+        return final_loss / (2 * self.batch_size)
+
+
+class NTXentLossCleanProj(torch.nn.Module):
+
+    def __init__(self, device, batch_size, temperature, use_cosine_similarity):
+        super(NTXentLossCleanProj, self).__init__()
+
+        self.temperature = temperature
+        self.batch_size = batch_size
+        self.device = device
+
+        self.similarity = torch.nn.CosineSimilarity()
+        self.criterion = torch.nn.CrossEntropyLoss(reduction="sum")
+
+        self.projection_head = nn.Sequential(
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128)
+        )
+
+    def forward(self, zis, zjs, partnet_ids):
+
+        final_loss = 0
+
+        for i, zi in enumerate(zis):
+            negative_similarities = []
+            with torch.no_grad():
+                zi_ = zi[None, ...]
+                zi_ = self.projection_head(zi_)
+                for j, zj in enumerate(zjs):
+                    zj_ = zj[None, ...]
+                    zj_ = self.projection_head(zj_)
+                    if i != j and partnet_ids[i] != partnet_ids[j]:
+                        negative_similarities += [self.similarity(zi_, zj_) / self.temperature]
+                    else:
+                        positive_similarity = self.similarity(zi_, zj_) / self.temperature
+                for k, zk in enumerate(zis):
+                    zk_ = zk[None, ...]
+                    zk_ = self.projection_head(zk_)
+                    if k != i and partnet_ids[i] != partnet_ids[k]:
+                        negative_similarities += [self.similarity(zi_, zk_) / self.temperature]
+
+            negative_similarities = [positive_similarity] + negative_similarities
+
+            labels = torch.zeros(1).to(self.device).long()
+            loss = self.criterion(torch.cat(negative_similarities)[None, ...], labels)
+
+            final_loss += loss
+
+            labels = labels.to('cpu')
+            del labels
+
+        del negative_similarities, positive_similarity
+        gc.collect()
 
         return final_loss / (2 * self.batch_size)
 
@@ -225,11 +291,15 @@ class NTXentLossChildrenClean(torch.nn.Module):
         final_loss = 0
 
         for i, children_i in enumerate(children_is):
+            if len(children_i.shape) == 1:
+                children_i = children_i[None, ...]
             children_i_concat = torch.flatten(children_i)[None, ...]
             num_children_i = len(children_i)
             negative_similarities = []
             # with torch.no_grad():
             for j, children_j in enumerate(children_js):
+                if len(children_j.shape) == 1:
+                    children_j = children_j[None, ...]
                 num_children_j = len(children_j)
                 # negatives
                 if i != j and partnet_ids[i] != partnet_ids[j]:
@@ -242,12 +312,80 @@ class NTXentLossChildrenClean(torch.nn.Module):
                     positive_similarity = self.similarity(children_i_concat, children_j_concat_pos) / self.temperature
             # negatives from another samples in batch
             for k, children_k in enumerate(children_is):
+                if len(children_k.shape) == 1:
+                    children_k = children_k[None, ...]
                 num_children_k = len(children_k)
                 if k != i and partnet_ids[i] != partnet_ids[k]:
                     negative_indices = np.random.choice(num_children_k, num_children_i)
                     children_k_concat = torch.flatten(children_k[negative_indices])[None, ...]
                     negative_similarities += [self.similarity(children_i_concat, children_k_concat) / self.temperature]
             # end of torch.no_grad()
+
+            negative_similarities = [positive_similarity] + negative_similarities
+
+            labels = torch.zeros(1).to(self.device).long()
+            loss = self.criterion(torch.cat(negative_similarities)[None, ...], labels)
+
+            final_loss += loss
+
+        return final_loss / (2 * self.batch_size)
+
+
+class NTXentLossChildrenCleanProj(torch.nn.Module):
+
+    def __init__(self, device, batch_size, temperature):
+        super(NTXentLossChildrenCleanProj, self).__init__()
+
+        self.temperature = temperature
+        self.batch_size = batch_size
+        self.device = device
+
+        self.similarity = torch.nn.CosineSimilarity()
+        self.criterion = torch.nn.CrossEntropyLoss(reduction="sum")
+
+        self.projection_head = nn.Sequential(
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128)
+        )
+
+    def forward(self, children_is, children_js, partnet_ids):
+
+        final_loss = 0
+
+        for i, children_i in enumerate(children_is):
+            if len(children_i.shape) == 1:
+                children_i = children_i[None, ...]
+            children_i = self.projection_head(children_i)
+            children_i_concat = torch.flatten(children_i)[None, ...]
+            num_children_i = len(children_i)
+            negative_similarities = []
+            for j, children_j in enumerate(children_js):
+                if len(children_j.shape) == 1:
+                    children_j = children_j[None, ...]
+                children_j = self.projection_head(children_j)
+                num_children_j = len(children_j)
+                # negatives
+                if i != j and partnet_ids[i] != partnet_ids[j]:
+                    negative_indices = np.random.choice(num_children_j, num_children_i)
+                    children_j_concat = torch.flatten(children_j[negative_indices])[None, ...]
+                    negative_similarities += [self.similarity(children_i_concat, children_j_concat) / self.temperature]
+                # positive
+                else:
+                    children_j_concat_pos = torch.flatten(children_j)[None, ...]
+                    positive_similarity = self.similarity(children_i_concat, children_j_concat_pos) / self.temperature
+            # negatives from another samples in batch
+            for k, children_k in enumerate(children_is):
+                if len(children_k.shape) == 1:
+                    children_k = children_k[None, ...]
+                children_k = self.projection_head(children_k)
+                num_children_k = len(children_k)
+                if k != i and partnet_ids[i] != partnet_ids[k]:
+                    negative_indices = np.random.choice(num_children_k, num_children_i)
+                    children_k_concat = torch.flatten(children_k[negative_indices])[None, ...]
+                    negative_similarities += [self.similarity(children_i_concat, children_k_concat) / self.temperature]
 
             negative_similarities = [positive_similarity] + negative_similarities
 
@@ -316,6 +454,8 @@ class NTXentLossChildrenPartwise(torch.nn.Module):
 
         for t, children_t in enumerate(children_ts):
             children_r = children_rs[t]
+            if len(children_t.shape) == 1 or len(children_r.shape) == 1:
+                continue
             for i, zi in enumerate(children_t):
                 negative_similarities = []
                 zi_ = zi[None, ...]
@@ -470,28 +610,33 @@ class NTXentLossChildrenFmapsClean(torch.nn.Module):
 
         for fmap_num in range(3):
             for i, children_i_fmap in enumerate(children_is_fmaps[fmap_num]):
-                children_i_concat = torch.flatten(torch.cat(children_i_fmap))[None, ...]
                 num_children_i = len(children_i_fmap)
+                if num_children_i == 0:
+                    continue
+                children_i_concat = torch.flatten(torch.cat(children_i_fmap))[None, ...]
                 negative_similarities = []
                 # with torch.no_grad():
                 for j, children_j_fmap in enumerate(children_js_fmaps[fmap_num]):
                     num_children_j = len(children_j_fmap)
                     # negatives
-                    if i != j and partnet_ids[i] != partnet_ids[j]:
+                    if i != j and partnet_ids[i] != partnet_ids[j] and num_children_j != 0:
                         negative_indices = np.random.choice(num_children_j, num_children_i)
                         children_j_concat = torch.flatten(torch.cat(children_j_fmap)[negative_indices])[None, ...]
-                        negative_similarities += [self.similarity(children_i_concat, children_j_concat) / self.temperature]
+                        negative_similarities += [
+                            self.similarity(children_i_concat, children_j_concat) / self.temperature]
                     # positive
-                    else:
+                    elif num_children_j != 0:
                         children_j_concat_pos = torch.flatten(torch.cat(children_j_fmap))[None, ...]
-                        positive_similarity = self.similarity(children_i_concat, children_j_concat_pos) / self.temperature
+                        positive_similarity = self.similarity(children_i_concat,
+                                                              children_j_concat_pos) / self.temperature
                 # negatives from another samples in batch
                 for k, children_k_fmap in enumerate(children_is_fmaps[fmap_num]):
                     num_children_k = len(children_k_fmap)
-                    if k != i and partnet_ids[i] != partnet_ids[k]:
+                    if k != i and partnet_ids[i] != partnet_ids[k] and num_children_k != 0:
                         negative_indices = np.random.choice(num_children_k, num_children_i)
                         children_k_concat = torch.flatten(torch.cat(children_k_fmap)[negative_indices])[None, ...]
-                        negative_similarities += [self.similarity(children_i_concat, children_k_concat) / self.temperature]
+                        negative_similarities += [
+                            self.similarity(children_i_concat, children_k_concat) / self.temperature]
                 # end of torch.no_grad()
 
                 negative_similarities = [positive_similarity] + negative_similarities
@@ -523,6 +668,10 @@ class NTXentLossChildrenFmapsPartwise(torch.nn.Module):
         for fmap_num in range(3):
             for t, children_t_fmap in enumerate(children_ts_fmaps[fmap_num]):
                 children_r_fmap = children_rs_fmaps[fmap_num][t]
+                num_children_r = len(children_r_fmap)
+                num_children_t = len(children_t_fmap)
+                if num_children_r == 0 or num_children_t == 0:
+                    continue
                 for i, zi in enumerate(children_t_fmap):
                     negative_similarities = []
                     zi_ = torch.flatten(zi)[None, ...]

@@ -18,7 +18,7 @@ from src.datasets.partnet import generate_scannet_allshapes_datasets, generate_s
 
 
 class GNNPartnetLightning(pl.LightningModule):
-    def __init__(self, hparams):
+    def __init__(self, hparams, inference=False):
         super(GNNPartnetLightning, self).__init__()
 
         if isinstance(hparams, dict):
@@ -33,15 +33,19 @@ class GNNPartnetLightning(pl.LightningModule):
                 else:
                     self.config[_k] = "null"
 
-        datasets = generate_scannet_allshapes_rot_datasets(**config)
-        self.train_dataset = datasets['train']
-        self.val_dataset = datasets['val']
+        try:
+            datasets = generate_scannet_allshapes_rot_datasets(**config)
+            self.train_dataset = datasets['train']
+            self.val_dataset = datasets['val']
+        except FileNotFoundError:
+            print('If this is not inference, check your code!')
 
-        self.config['parts_to_ids_path'] = os.path.join(config['datadir'], config['dataset'], config['parts_to_ids_path'])
+        self.config['parts_to_ids_path'] = os.path.join(config['datadir'], config['dataset'],
+                                                        config['parts_to_ids_path'])
 
         Tree.load_category_info(os.path.join(config['datadir'], config['dataset']))
-        self.encoder = GeoEncoder(**config)
-        self.decoder = HierarchicalDecoder(**config)
+        self.encoder = GeoEncoder(**self.config)
+        self.decoder = HierarchicalDecoder(**self.config)
         if self.config['encode_mask']:
             self.mask_encoder = GeoEncoder(**config)
 
@@ -52,8 +56,10 @@ class GNNPartnetLightning(pl.LightningModule):
         torch.backends.cudnn.enabled = False
         torch.backends.cudnn.deterministic = True
 
-        with open(os.path.join(config['base'], config['checkpoint_dir'], config['model'], config['version'], 'config.json'), 'w') as f:
-            json.dump(self.config, f)
+        # if not inference:
+        #     with open(os.path.join(config['base'], config['checkpoint_dir'], config['model'], config['version'],
+        #                            'config.json'), 'w') as f:
+        #         json.dump(config, f)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.config['learning_rate'], weight_decay=self.config['weight_decay'])

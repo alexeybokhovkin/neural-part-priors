@@ -5,7 +5,8 @@ import torch
 import torch.nn as nn
 
 from ..buildingblocks import FeatureVector, ConvEncoder, ConvDecoder
-from .gnn import RecursiveDecoder
+# from .gnn import RecursiveDecoder
+from .gnn_contrast import RecursiveDecoder
 
 
 class GeoEncoder(nn.Module):
@@ -87,14 +88,17 @@ class HierarchicalDecoder(nn.Module):
                                                   enc_conv_kernel_sizes, last_pooling_size,
                                                   base=base, output_paddings=output_paddings, joins=joins)
 
+        self.mseLoss = nn.MSELoss()
+
     def forward(self, x_root, mask_code=None, mask_feature=None, scan_geo=None, full_label=None, encoder_features=None,
-                rotation=None):
-        tree, S_priors, pred_rotation = self.recursive_decoder.decode_structure(x_root, self.max_depth, mask_code,
+                rotation=None, gt_tree=None):
+        output = self.recursive_decoder.decode_structure(x_root, self.max_depth, mask_code,
                                                                                 mask_feature, scan_geo=scan_geo,
                                                                                 full_label=full_label,
                                                                                 encoder_features=encoder_features,
-                                                                                rotation=rotation)
-        return tree, S_priors, pred_rotation
+                                                                                rotation=rotation,
+                                                                                gt_tree=gt_tree)
+        return output
 
     def structure_recon_loss(self, x_root, gt_tree, mask_code=None, mask_feature=None, scan_geo=None,
                              encoder_features=None, rotation=None):
@@ -102,6 +106,29 @@ class HierarchicalDecoder(nn.Module):
                                                            mask_feature=mask_feature,
                                                            scan_geo=scan_geo, encoder_features=encoder_features,
                                                            rotation=rotation)
+
+    def tto_recon_loss(self, x_root, gt_tree, mask_code=None, mask_feature=None, scan_geo=None,
+                       encoder_features=None, rotation=None):
+        return self.recursive_decoder.tto_recon_loss(x_root, gt_tree, mask_code=mask_code,
+                                                     mask_feature=mask_feature,
+                                                     scan_geo=scan_geo, encoder_features=encoder_features,
+                                                     rotation=rotation)
+
+    def children_mse_loss(self, pred_children, gt_children):
+        total_loss = 0
+        for i in range(len(pred_children)):
+            total_loss += self.mseLoss(pred_children[i], gt_children[i])
+        avg_loss = total_loss.mean()
+
+        return avg_loss
+
+    def children_geo_sum_loss(self, pred_geos, gt_geos):
+        total_loss = 0
+        for i in range(len(pred_geos)):
+            total_loss += self.mseLoss(torch.sum(pred_geos[i]), torch.sum(gt_geos[i]))
+        avg_loss = total_loss.mean()
+
+        return avg_loss
 
 
 class GeoDecoder(nn.Module):
