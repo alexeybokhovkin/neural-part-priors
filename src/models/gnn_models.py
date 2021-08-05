@@ -7,6 +7,7 @@ import torch.nn as nn
 from ..buildingblocks import FeatureVector, ConvEncoder, ConvDecoder
 # from .gnn import RecursiveDecoder
 from .gnn_contrast import RecursiveDecoder
+from .hier_decoder_deepsdf import RecursiveDeepSDFDecoder
 
 
 class GeoEncoder(nn.Module):
@@ -43,6 +44,52 @@ class GeoEncoder(nn.Module):
 
     def encode_loss(self, x_root, gt_root):
         return self.mseLoss(x_root, gt_root)
+
+
+class GeoDecoder(nn.Module):
+
+    def __init__(self, dec_in_f_maps=None, dec_out_f_maps=None,
+                 layer_order='crg', num_groups=8, dec_strides=1, dec_paddings=1,
+                 dec_number_of_fmaps=6, dec_conv_kernel_sizes=3,
+                 num_convs_per_block=1, scale_factors=None, output_paddings=None, joins=None,
+                 device='gpu', **kwargs):
+
+        super(GeoDecoder, self).__init__()
+
+        self.device = device
+
+        if not isinstance(dec_conv_kernel_sizes, list):
+            dec_conv_kernel_sizes = [dec_conv_kernel_sizes] * dec_number_of_fmaps
+        if not isinstance(dec_strides, list):
+            dec_strides = [dec_strides] * dec_number_of_fmaps
+        if not isinstance(dec_paddings, list):
+            dec_paddings = [dec_paddings] * dec_number_of_fmaps
+
+        self.node_decoder = ConvDecoder(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups,
+                                        scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings,
+                                        output_paddings, joins)
+
+        self.voxelLoss = nn.BCELoss()
+        self.mseLoss = nn.MSELoss()
+
+    def forward(self, x_root, encoder_feature=None):
+        x_root = x_root[..., None, None, None]
+        pred_masks = self.node_decoder(x_root, encoder_feature)
+
+        return pred_masks
+
+    def loss(self, pred, gt):
+        pred = torch.sigmoid(pred)
+        loss = self.voxelLoss(pred, gt)
+        avg_loss = loss.mean()
+
+        return avg_loss
+
+    def mse_loss(self, pred, gt):
+        loss = self.mseLoss(pred, gt)
+        avg_loss = loss.mean()
+
+        return avg_loss
 
 
 class HierarchicalDecoder(nn.Module):
@@ -90,29 +137,44 @@ class HierarchicalDecoder(nn.Module):
 
         self.mseLoss = nn.MSELoss()
 
-    def forward(self, x_root, mask_code=None, mask_feature=None, scan_geo=None, full_label=None, encoder_features=None,
-                rotation=None, gt_tree=None):
+    def forward(self, x_root, mask_code=None, mask_feature=None, full_label=None, encoder_features=None,
+                rotation=None, gt_tree=None, scan_geo=None):
         output = self.recursive_decoder.decode_structure(x_root, self.max_depth, mask_code,
-                                                                                mask_feature, scan_geo=scan_geo,
-                                                                                full_label=full_label,
-                                                                                encoder_features=encoder_features,
-                                                                                rotation=rotation,
-                                                                                gt_tree=gt_tree)
+                                                         mask_feature,
+                                                         full_label=full_label,
+                                                         encoder_features=encoder_features,
+                                                         rotation=rotation,
+                                                         gt_tree=gt_tree,
+                                                         scan_geo=scan_geo)
         return output
 
-    def structure_recon_loss(self, x_root, gt_tree, mask_code=None, mask_feature=None, scan_geo=None,
-                             encoder_features=None, rotation=None):
+    def inference_from_latents(self, root_latent, leaf_latents, mask_code=None, mask_feature=None,
+                               children_names=None):
+        output = self.recursive_decoder.decode_from_latents(root_latent, leaf_latents, mask_code, mask_feature,
+                                                            children_names)
+        return output
+
+    def structure_recon_loss(self, x_root, gt_tree, mask_code=None, mask_feature=None,
+                             encoder_features=None, rotation=None, scan_geo=None):
         return self.recursive_decoder.structure_recon_loss(x_root, gt_tree, mask_code=mask_code,
                                                            mask_feature=mask_feature,
-                                                           scan_geo=scan_geo, encoder_features=encoder_features,
-                                                           rotation=rotation)
+                                                           encoder_features=encoder_features,
+                                                           rotation=rotation, scan_geo=scan_geo)
 
-    def tto_recon_loss(self, x_root, gt_tree, mask_code=None, mask_feature=None, scan_geo=None,
-                       encoder_features=None, rotation=None):
+    def tto_loss(self, x_root, gt_tree, mask_code=None, mask_feature=None, scan_geo=None,
+                       encoder_features=None, rotation=None, scan_sdf=None, predicted_tree=None):
         return self.recursive_decoder.tto_recon_loss(x_root, gt_tree, mask_code=mask_code,
                                                      mask_feature=mask_feature,
                                                      scan_geo=scan_geo, encoder_features=encoder_features,
-                                                     rotation=rotation)
+                                                     rotation=rotation,
+                                                     scan_sdf=scan_sdf,
+                                                     predicted_tree=predicted_tree)
+
+    def tto_leaves_loss(self, x_root_learnable, child_feats_learnable, mask_code=None,
+                        mask_feature=None, scan_geo=None, scan_sdf=None,
+                        predicted_tree=None):
+        return self.recursive_decoder.tto_leaves_recon_loss(x_root_learnable, child_feats_learnable, mask_code,
+                        mask_feature, scan_geo, scan_sdf, predicted_tree)
 
     def children_mse_loss(self, pred_children, gt_children):
         total_loss = 0
@@ -131,47 +193,78 @@ class HierarchicalDecoder(nn.Module):
         return avg_loss
 
 
-class GeoDecoder(nn.Module):
+class HierarchicalDeepSDFDecoder(nn.Module):
+    def __init__(self, recursive_feat_size=128, recursive_hidden_size=128,
+                 max_child_num=10, device='gpu', edge_symmetric_type='avg', num_iterations=0,
+                 edge_type_num=0, num_parts=0, num_shapes=0, deep_sdf_specs=None, **kwargs):
 
-    def __init__(self, dec_in_f_maps=None, dec_out_f_maps=None,
-                 layer_order='crg', num_groups=8, dec_strides=1, dec_paddings=1,
-                 dec_number_of_fmaps=6, dec_conv_kernel_sizes=3,
-                 num_convs_per_block=1, scale_factors=None, output_paddings=None, joins=None,
-                 device='gpu', **kwargs):
+        super(HierarchicalDeepSDFDecoder, self).__init__()
 
-        super(GeoDecoder, self).__init__()
+        self.recursive_decoder = RecursiveDeepSDFDecoder(recursive_feat_size, recursive_hidden_size,
+                                                         max_child_num, device, edge_symmetric_type,
+                                                         num_iterations, edge_type_num,
+                                                         num_parts, num_shapes, deep_sdf_specs)
 
-        self.device = device
-
-        if not isinstance(dec_conv_kernel_sizes, list):
-            dec_conv_kernel_sizes = [dec_conv_kernel_sizes] * dec_number_of_fmaps
-        if not isinstance(dec_strides, list):
-            dec_strides = [dec_strides] * dec_number_of_fmaps
-        if not isinstance(dec_paddings, list):
-            dec_paddings = [dec_paddings] * dec_number_of_fmaps
-
-        self.node_decoder = ConvDecoder(dec_in_f_maps, dec_out_f_maps, num_convs_per_block, layer_order, num_groups,
-                                        scale_factors, dec_conv_kernel_sizes, dec_strides, dec_paddings,
-                                        output_paddings, joins)
-
-        self.voxelLoss = nn.BCELoss()
         self.mseLoss = nn.MSELoss()
 
-    def forward(self, x_root, encoder_feature=None):
-        x_root = x_root[..., None, None, None]
-        pred_masks = self.node_decoder(x_root, encoder_feature)
+    def forward(self, x_root, sdf_data, full_label=None, encoder_features=None, rotation=None, gt_tree=None,
+                index=0):
+        output = self.recursive_decoder.decode_structure(x_root, sdf_data,
+                                                         full_label=full_label,
+                                                         encoder_features=encoder_features,
+                                                         rotation=rotation,
+                                                         gt_tree=gt_tree,
+                                                         index=index)
+        return output
 
-        return pred_masks
+    def forward_two_stage(self, x_root, sdf_data, full_label=None, encoder_features=None, rotation=None, gt_tree=None,
+                          index=0, parts_indices=None, full_shape_idx=None, noise_full=None):
+        output = self.recursive_decoder.decode_structure_two_stage(x_root, sdf_data,
+                                                                   full_label=full_label,
+                                                                   encoder_features=encoder_features,
+                                                                   rotation=rotation,
+                                                                   gt_tree=gt_tree,
+                                                                   index=index,
+                                                                   parts_indices=parts_indices,
+                                                                   full_shape_idx=full_shape_idx,
+                                                                   noise_full=noise_full)
+        return output
 
-    def loss(self, pred, gt):
-        pred = torch.sigmoid(pred)
-        loss = self.voxelLoss(pred, gt)
-        avg_loss = loss.mean()
+    def structure_recon_loss(self, x_root, gt_tree, sdf_data,
+                             encoder_features=None, rotation=None,
+                             parts_indices=None, epoch=0,
+                             full_shape_idx=None,
+                             noise_full=None):
+        return self.recursive_decoder.structure_recon_loss(x_root, gt_tree, sdf_data,
+                                                           encoder_features=encoder_features, rotation=rotation,
+                                                           parts_indices=parts_indices, epoch=epoch,
+                                                           full_shape_idx=full_shape_idx,
+                                                           noise_full=noise_full)
 
-        return avg_loss
+    def latent_recon_loss(self, x_root, gt_tree, sdf_data,
+                             encoder_features=None, rotation=None,
+                             parts_indices=None, epoch=0,
+                             full_shape_idx=None,
+                             noise_full=None):
+        return self.recursive_decoder.latent_recon_loss(x_root, gt_tree, sdf_data,
+                                                        encoder_features=encoder_features, rotation=rotation,
+                                                        parts_indices=parts_indices, epoch=epoch,
+                                                        full_shape_idx=full_shape_idx,
+                                                        noise_full=noise_full)
 
-    def mse_loss(self, pred, gt):
-        loss = self.mseLoss(pred, gt)
-        avg_loss = loss.mean()
+    def deepsdf_recon_loss(self, sdf_data, parts_indices=None, epoch=0,
+                           full_shape_idx=None, noise_full=None):
+        return self.recursive_decoder.deepsdf_recon_loss(sdf_data, parts_indices=parts_indices, epoch=epoch,
+                                                         full_shape_idx=full_shape_idx, noise_full=noise_full)
 
-        return avg_loss
+    def get_latent_vecs(self):
+        return self.recursive_decoder.get_latent_vecs()
+
+    def get_latent_shape_vecs(self):
+        return self.recursive_decoder.get_latent_shape_vecs()
+
+    def tto(self, children_initial_data, shape_initial_data):
+        return self.recursive_decoder.tto(children_initial_data, shape_initial_data)
+
+
+

@@ -329,6 +329,7 @@ class PartNetDataset(data.Dataset):
             parent = stack_elm.parent
             parent_child_idx = stack_elm.parent_child_idx
             node_json = stack_elm.node_json
+            print(node_json)
 
             node = Tree.Node(
                 part_id=node_json['id'],

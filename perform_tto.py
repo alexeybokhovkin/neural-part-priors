@@ -10,6 +10,7 @@ import numpy as np
 
 from src.utils.config import load_config
 from src.lightning_models.gnn_scannet_contrastive import GNNPartnetLightning
+# from src.lightning_models.gnn_scannet_byol import GNNPartnetLightning
 from src.datasets.partnet import generate_scannet_allshapes_contrastive_datasets
 
 
@@ -22,7 +23,7 @@ def main(args):
     PREDICTED_TREES_SAVE_DIR = os.path.join('/'.join(config.resume_from_checkpoint.split('/')[:-2]), config.tto_savedir)
     os.makedirs(PREDICTED_TREES_SAVE_DIR, exist_ok=True)
 
-    for i in tqdm(range(len(datasets['val']))[:50]):
+    for i in tqdm(range(len(datasets['val']))[:300]):
 
         device = torch.device('cuda:0')
         model = GNNPartnetLightning(config)
@@ -36,19 +37,27 @@ def main(args):
         scan_id = '_'.join([tokens[1], tokens[2]])
         instance_id = int(tokens[3])
 
+        # ids_to_process = ['42378_scene0435_02_8', '40610_scene0206_02_5', '40337_scene0134_00_4', '40863_scene0286_01_3']
+        # if '_'.join(tokens) not in ids_to_process:
+        #     continue
+
         scan_geo = batch[0].to(device)[None, ...]
         batch[0] = (scan_geo,)
+        scan_sdf = batch[1].to(device)[None, ...]
+        batch[1] = (scan_sdf,)
         shape = batch[2][0].to(device)
         batch[2] = (shape,)
         batch[3] = (batch[3],)
         batch[5] = (batch[5],)
-        output = pretrained_model.tto_root(batch, config.tto_iterations)
+        output = pretrained_model.tto_latent_root(batch, config.tto_iterations)
+        # output = pretrained_model.tto_latent_leaves(batch, config.tto_iterations)
 
         SAVE_LOCAL_DIR = os.path.join(PREDICTED_TREES_SAVE_DIR, '_'.join(tokens))
         os.makedirs(SAVE_LOCAL_DIR, exist_ok=True)
         predicted_trees = output[0]
         all_losses_detached = output[1]
         all_child_feats = output[2]
+        all_x_roots = output[3]
 
         losses_aggregated = {}
         for losses in all_losses_detached:
@@ -70,6 +79,8 @@ def main(args):
                     pickle.dump(pd_tree, fout)
                 with open(os.path.join(SAVE_LOCAL_DIR, f'children_feats_{j}'), 'wb') as fout:
                     np.save(fout, all_child_feats[j])
+                with open(os.path.join(SAVE_LOCAL_DIR, f'x_root_{j}'), 'wb') as fout:
+                    np.save(fout, all_x_roots[j])
         with open(os.path.join(SAVE_LOCAL_DIR, 'losses.json'), 'w') as fout:
             json.dump(losses_aggregated, fout)
 

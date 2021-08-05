@@ -1,4 +1,4 @@
-import os
+import os, sys
 import pickle
 import json
 from collections import namedtuple
@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset
 
 from ..data_utils.hierarchy import Tree
+from deep_sdf_utils.data import unpack_sdf_samples, get_noise_points
 
 class VoxelPartnetAllShapesDataset(Dataset):
 
@@ -110,7 +111,7 @@ class VoxelisedScanNetAllShapesGNNDataset(Dataset):
                 assert False, 'ERROR: unknown feat type %s!' % feat
 
         voxel_path = os.path.join(self.shapenet_voxelized_path, partnet_id, 'full_vox.colored.pkl')
-        shape_sdf = torch.zeros((32, 32, 32))
+        shape_sdf = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id}_sdf.npy')))
         shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}_full.npy')))
         scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id}.npy')))
 
@@ -299,7 +300,8 @@ class VoxelisedScanNetAllShapesGNNDatasetContrastive(VoxelisedScanNetAllShapesGN
                 assert False, 'ERROR: unknown feat type %s!' % feat
 
         voxel_path = os.path.join(self.shapenet_voxelized_path, partnet_id, 'full_vox.colored.pkl')
-        shape_sdf = torch.zeros((32, 32, 32))
+        # shape_sdf = torch.zeros((32, 32, 32))
+        shape_sdf = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id}_sdf.npy')))
         shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}_full.npy')))
         scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id}.npy')))
 
@@ -310,6 +312,8 @@ class VoxelisedScanNetAllShapesGNNDatasetContrastive(VoxelisedScanNetAllShapesGN
         partnet_id_pos = self.object_names[pos_idx].split("_")[0]
 
         scannet_geo_pos = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id_pos}.npy')))
+        # shape_sdf_pos = torch.zeros((32, 32, 32))
+        shape_sdf_pos = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geoscan', f'{partnet_scannet_id_pos}_sdf.npy')))
         shape_mask_pos = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id_pos}_full.npy')))
         if 'object' in self.data_features:
             geo_fn = os.path.join(self.datadir, common_path + '_geo', f'{partnet_id_pos}.npy')
@@ -330,7 +334,7 @@ class VoxelisedScanNetAllShapesGNNDatasetContrastive(VoxelisedScanNetAllShapesGN
             latent = 0
 
         output = (scannet_geo, shape_sdf, shape_mask, data_feats, partnet_id, 0, tokens, latent,
-                  scannet_geo_pos, shape_mask_pos, data_feats_pos)
+                  scannet_geo_pos, shape_sdf_pos, shape_mask_pos, data_feats_pos)
 
         return output
 
@@ -349,6 +353,260 @@ def generate_scannet_allshapes_contrastive_datasets(datadir=None, dataset=None, 
                             shapenet_voxelized_path=shapenet_voxelized_path, latent_constraint_path=latent_constraint_path)
     val_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, val_samples, data_features, load_geo,
                           shapenet_voxelized_path=shapenet_voxelized_path, latent_constraint_path=latent_constraint_path)
+
+    return {
+        'train': train_dataset,
+        'val': val_dataset
+    }
+
+
+class VoxelisedImplicitAllShapesDataset(VoxelisedScanNetAllShapesGNNDataset):
+
+    def __init__(self, datadir, dataset, partnet_to_dirs_path, object_list, data_features, load_geo=False,
+                 shapenet_voxelized_path=None, num_subsample_points=0, sdf_data_source=None,
+                 parts_to_shapes_path=None, shapes_to_cat_path=None, partnet_to_parts_path=None):
+        super(VoxelisedImplicitAllShapesDataset, self).__init__(datadir, dataset, partnet_to_dirs_path,
+                                                                object_list, data_features, load_geo,
+                                                                shapenet_voxelized_path)
+
+        self.num_subsample_points = num_subsample_points
+        self.sdf_data_source = sdf_data_source
+
+        # parts_to_shapes_path = '/home/bohovkin/cluster/abokhovkin_home/projects/scannet-relationships/dicts/parts_to_shapes.json'
+        # shapes_to_cat_path = '/home/bohovkin/cluster/abokhovkin_home/projects/scannet-relationships/dicts/obj_to_cat.json'
+        # partnet_to_parts_path = '/home/bohovkin/cluster/abokhovkin_home/projects/scannet-relationships/dicts/partnet_to_parts.json'
+
+        # load metadata mappings
+        with open(parts_to_shapes_path, 'rb') as fin:
+            self.parts_to_shapes = json.load(fin)
+        self.shapes_to_parts = {self.parts_to_shapes[k]: k for k in self.parts_to_shapes}
+        with open(shapes_to_cat_path, 'rb') as fin:
+            self.shapes_to_cats = json.load(fin)
+        with open(partnet_to_parts_path, 'rb') as fin:
+            self.partnet_to_parts = json.load(fin)
+
+        self.all_partnet_ids = sorted(list(self.partnet_to_parts.keys()))
+
+        self.parts_to_indices = {}
+        idx = 0
+        for object_name in self.object_names:
+            cur_partnet_id = object_name.split('_')[0]
+            cur_parts = self.partnet_to_parts[cur_partnet_id]
+            if cur_partnet_id not in self.parts_to_indices:
+                self.parts_to_indices[cur_partnet_id] = {}
+                for cur_part in cur_parts:
+                    self.parts_to_indices[cur_partnet_id][cur_part] = idx
+                    idx += 1
+        self.num_parts = idx
+        self.num_shapes = len(self.all_partnet_ids)
+
+    def __getitem__(self, index):
+        partnet_scannet_id = self.object_names[index]
+        tokens = partnet_scannet_id.split('_')
+        partnet_id = tokens[0]
+        rotation = 0
+        common_path = self.partnet_to_dirs[partnet_id].split('/')[-1]
+        if 'object' in self.data_features:
+            geo_fn = os.path.join(self.datadir, common_path + '_geo', partnet_id + '.npy')
+            obj = self.load_object(os.path.join(self.datadir, common_path + '_hier', partnet_id + '.json'),
+                                   load_geo=self.load_geo, geo_fn=geo_fn)
+
+        data_feats = ()
+        for feat in self.data_features:
+            if feat == 'object':
+                data_feats = data_feats + (obj,)
+            elif feat == 'name':
+                data_feats = data_feats + (partnet_id,)
+            else:
+                assert False, 'ERROR: unknown feat type %s!' % feat
+
+        shape_sdf = torch.zeros((32, 32, 32))
+        shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}_full.npy')))
+        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_geo', f'{partnet_id}_full.npy')))[0]
+
+        child_names = []
+        if 'object' in self.data_features:
+            for child in obj.root.children:
+                child_names += [child.label]
+        obj_id = self.parts_to_shapes[partnet_id]
+        cat_id = self.shapes_to_cats[obj_id]
+
+        sdf_filenames = [os.path.join(self.sdf_data_source, f'{cat_id}-{child_names[i]}', f'{obj_id}.npz') for i in range(len(child_names))]
+        sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, self.num_subsample_points))[None, ...] for filename in sdf_filenames], dim=0)
+        parts_indices = {x: self.parts_to_indices[partnet_id][x] for x in child_names}
+
+        full_shape_idx = self.all_partnet_ids.index(partnet_id)
+
+        output = (scannet_geo, shape_sdf, shape_mask, data_feats, partnet_id, int(rotation), tokens,
+                  sdf_filenames, sdf_parts, parts_indices, full_shape_idx)
+
+        return output
+
+
+def generate_gnn_deepsdf_datasets(datadir=None, dataset=None, partnet_to_dirs_path=None,
+                                  train_samples='train.txt', val_samples='train.txt',
+                                  data_features=('object',), load_geo=True,
+                                  shapenet_voxelized_path=None, num_subsample_points=0,
+                                  sdf_data_source=None, parts_to_shapes_path=None,
+                                  shapes_to_cat_path=None, partnet_to_parts_path=None,
+                                  **kwargs):
+    if isinstance(data_features, str):
+        data_features = [data_features]
+
+    Dataset = VoxelisedImplicitAllShapesDataset
+
+    train_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, train_samples, data_features, load_geo,
+                            shapenet_voxelized_path, num_subsample_points,
+                            sdf_data_source, parts_to_shapes_path,
+                            shapes_to_cat_path, partnet_to_parts_path)
+    val_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, val_samples, data_features, load_geo,
+                          shapenet_voxelized_path, num_subsample_points,
+                          sdf_data_source, parts_to_shapes_path,
+                          shapes_to_cat_path, partnet_to_parts_path)
+
+    return {
+        'train': train_dataset,
+        'val': val_dataset
+    }
+
+
+class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
+
+    def __init__(self, datadir, dataset, partnet_to_dirs_path, object_list, data_features, load_geo=False,
+                 shapenet_voxelized_path=None, num_subsample_points=0, sdf_data_source=None,
+                 parts_to_shapes_path=None, shapes_to_cat_path=None, partnet_to_parts_path=None):
+        super(VoxelisedImplicitScanNetDataset, self).__init__(datadir, dataset, partnet_to_dirs_path,
+                                                              object_list, data_features, load_geo,
+                                                              shapenet_voxelized_path)
+
+        self.num_subsample_points = num_subsample_points
+        self.sdf_data_source = sdf_data_source
+
+        # parts_to_shapes_path = '/home/bohovkin/cluster/abokhovkin_home/projects/scannet-relationships/dicts/parts_to_shapes.json'
+        # shapes_to_cat_path = '/home/bohovkin/cluster/abokhovkin_home/projects/scannet-relationships/dicts/obj_to_cat.json'
+        # partnet_to_parts_path = '/home/bohovkin/cluster/abokhovkin_home/projects/scannet-relationships/dicts/partnet_to_parts.json'
+
+        # load metadata mappings
+        with open(parts_to_shapes_path, 'rb') as fin:
+            self.parts_to_shapes = json.load(fin)
+        self.shapes_to_parts = {self.parts_to_shapes[k]: k for k in self.parts_to_shapes}
+        with open(shapes_to_cat_path, 'rb') as fin:
+            self.shapes_to_cats = json.load(fin)
+        with open(partnet_to_parts_path, 'rb') as fin:
+            self.partnet_to_parts = json.load(fin)
+
+        self.existing_partnet_ids = []
+        self.parts_to_indices = {}
+        idx = 0
+        for object_name in self.object_names:
+            cur_partnet_id = object_name.split('_')[0]
+            self.existing_partnet_ids += [cur_partnet_id]
+            cur_parts = self.partnet_to_parts[cur_partnet_id]
+            if cur_partnet_id not in self.parts_to_indices:
+                self.parts_to_indices[cur_partnet_id] = {}
+                for cur_part in cur_parts:
+                    self.parts_to_indices[cur_partnet_id][cur_part] = idx
+                    idx += 1
+        self.num_parts = idx
+        self.existing_partnet_ids = sorted(list(set(self.existing_partnet_ids)))
+        self.num_shapes = len(self.existing_partnet_ids)
+
+        print('Num all shapes:', self.num_shapes)
+        print('Num all parts:', self.num_parts)
+
+        with open('/rhome/abokhovkin/projects/DeepSDF/experiments/full_experiments/chair_full/sv2_chairs_train.json', 'r') as f:
+            chair_full_list = json.load(f)
+        i = 0
+        self.chair_full_map = {}
+        for idx in chair_full_list['ShapeNetV2']['03001627']:
+            self.chair_full_map[idx] = i
+            i += 1
+        i = 0
+        with open('/rhome/abokhovkin/projects/DeepSDF/experiments/full_experiments/chair_parts/sv2_chairs_train.json', 'r') as f:
+            chair_parts_list = json.load(f)
+        self.chair_parts_map = {}
+        for part_id in chair_parts_list['ShapeNetV2']:
+            part_name = part_id.split('-')[1]
+            if part_name not in self.chair_parts_map:
+                self.chair_parts_map[part_name] = {}
+            for idx in chair_parts_list['ShapeNetV2'][part_id]:
+                self.chair_parts_map[part_name][idx] = i
+                i += 1
+
+    def __getitem__(self, index):
+        partnet_scannet_id = self.object_names[index]
+        tokens = partnet_scannet_id.split('_')
+        partnet_id = tokens[0]
+        instance_id = tokens[-1]
+        rotation = 0
+        common_path = self.partnet_to_dirs[partnet_id].split('/')[-1]
+        if 'object' in self.data_features:
+            geo_fn = os.path.join(self.datadir, common_path + '_geo', partnet_id + '.npy')
+            obj = self.load_object(os.path.join(self.datadir, common_path + '_hier', partnet_id + '.json'),
+                                   load_geo=self.load_geo, geo_fn=geo_fn)
+
+        data_feats = ()
+        for feat in self.data_features:
+            if feat == 'object':
+                data_feats = data_feats + (obj,)
+            elif feat == 'name':
+                data_feats = data_feats + (partnet_id,)
+            else:
+                assert False, 'ERROR: unknown feat type %s!' % feat
+
+        shape_sdf = torch.zeros((32, 32, 32))
+        shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet', f'{partnet_scannet_id}.npy')))
+        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet', f'{partnet_scannet_id}.npy')))
+
+        child_names = []
+        if 'object' in self.data_features:
+            for child in obj.root.children:
+                child_names += [child.label]
+        obj_id = self.parts_to_shapes[partnet_id]
+        cat_id = self.shapes_to_cats[obj_id]
+
+        sdf_filenames = [os.path.join(self.sdf_data_source, f'{cat_id}-{child_names[i]}', f'{obj_id}_{partnet_id}_{instance_id}.npz') for i in range(len(child_names))]
+        sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, self.num_subsample_points)[0])[None, ...] for filename in sdf_filenames], dim=0)
+        # parts_indices = {x: self.parts_to_indices[partnet_id][x] for x in child_names}
+        SHAPES_DIR = '/cluster/sorona/abokhovkin/DeepSDF/ShapeNetV2_dim256_uniform/SdfSamples/ShapeNetV2/03001627'
+        noise_full = np.load(os.path.join(SHAPES_DIR, obj_id + '.npz'))['random_part']
+        noise_full = np.hstack([noise_full, 0.07 * np.ones((len(noise_full), 1))]).astype('float32')
+        noise_full = torch.FloatTensor(noise_full)
+        # noise_full = torch.FloatTensor(unpack_sdf_samples(sdf_filenames[0], self.num_subsample_points)[1])[None, ...]
+        # noise_full = None
+        # full_shape_idx = self.existing_partnet_ids.index(partnet_id)
+
+        print('All children:', child_names)
+        parts_indices = {x: self.chair_parts_map[x][obj_id] for x in child_names}
+        full_shape_idx = self.chair_full_map[obj_id]
+
+        output = (scannet_geo, shape_sdf, shape_mask, data_feats, partnet_id, int(rotation), tokens,
+                  sdf_filenames, sdf_parts, parts_indices, full_shape_idx,
+                  noise_full, index)
+
+        return output
+
+
+def generate_gnn_deepsdf_scannet_datasets(datadir=None, dataset=None, partnet_to_dirs_path=None,
+                                          train_samples='train.txt', val_samples='train.txt',
+                                          data_features=('object',), load_geo=True,
+                                          shapenet_voxelized_path=None, num_subsample_points=0,
+                                          sdf_data_source=None, parts_to_shapes_path=None,
+                                          shapes_to_cat_path=None, partnet_to_parts_path=None,
+                                          **kwargs):
+    if isinstance(data_features, str):
+        data_features = [data_features]
+
+    Dataset = VoxelisedImplicitScanNetDataset
+
+    train_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, train_samples, data_features, load_geo,
+                            shapenet_voxelized_path, num_subsample_points,
+                            sdf_data_source, parts_to_shapes_path,
+                            shapes_to_cat_path, partnet_to_parts_path)
+    val_dataset = Dataset(datadir, dataset, partnet_to_dirs_path, val_samples, data_features, load_geo,
+                          shapenet_voxelized_path, num_subsample_points,
+                          sdf_data_source, parts_to_shapes_path,
+                          shapes_to_cat_path, partnet_to_parts_path)
 
     return {
         'train': train_dataset,

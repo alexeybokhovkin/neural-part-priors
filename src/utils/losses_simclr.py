@@ -138,12 +138,22 @@ class NTXentLossCleanProj(torch.nn.Module):
         self.similarity = torch.nn.CosineSimilarity()
         self.criterion = torch.nn.CrossEntropyLoss(reduction="sum")
 
+        # size = 128
+        # self.projection_head = nn.Sequential(
+        #     nn.Linear(size, size),
+        #     nn.ReLU(),
+        #     nn.Linear(size, size),
+        #     nn.ReLU(),
+        #     nn.Linear(size, 128)
+        # )
+
+        size = 256
         self.projection_head = nn.Sequential(
-            nn.Linear(128, 128),
+            nn.Linear(size, 2048),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(2048, 2048),
             nn.ReLU(),
-            nn.Linear(128, 128)
+            nn.Linear(2048, size)
         )
 
     def forward(self, zis, zjs, partnet_ids):
@@ -343,12 +353,22 @@ class NTXentLossChildrenCleanProj(torch.nn.Module):
         self.similarity = torch.nn.CosineSimilarity()
         self.criterion = torch.nn.CrossEntropyLoss(reduction="sum")
 
+        # size = 128
+        # self.projection_head = nn.Sequential(
+        #     nn.Linear(size, size),
+        #     nn.ReLU(),
+        #     nn.Linear(size, size),
+        #     nn.ReLU(),
+        #     nn.Linear(size, 128)
+        # )
+
+        size = 256
         self.projection_head = nn.Sequential(
-            nn.Linear(128, 128),
+            nn.Linear(size, 2048),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(2048, 2048),
             nn.ReLU(),
-            nn.Linear(128, 128)
+            nn.Linear(2048, size)
         )
 
     def forward(self, children_is, children_js, partnet_ids):

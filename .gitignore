@@ -129,6 +129,9 @@ experiments/
 ._.DS_Store
 ._*
 *.yaml
+meshes/
+meshes_scannet/
+*.out
 
 test_notebooks/
 logs/

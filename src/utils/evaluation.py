@@ -11,7 +11,8 @@ from sklearn.manifold import TSNE
 import seaborn as sns
 import umap
 
-from ..lightning_models.gnn_scannet_contrastive import GNNPartnetLightning
+# from ..lightning_models.gnn_scannet_contrastive import GNNPartnetLightning
+from ..lightning_models.gnn_scannet_byol import GNNPartnetLightning
 from .gnn import rotate_tree_geos
 from .vox import load_sample
 from .metrics import grid_iou_by_part, grid_chamfer_distance_by_part, mean_chamfer, mean_iou
@@ -258,7 +259,7 @@ class Evaluator:
         plt.figure(figsize=(16, 10))
         sns.scatterplot(
             x="tsne-2d-one", y="tsne-2d-two",
-            palette=sns.color_palette("hls", 8),
+            palette=sns.color_palette("hls", len(np.unique(latent_labels))),
             hue="color",
             data=data_tsne,
             legend="full",
@@ -279,7 +280,7 @@ class Evaluator:
         plt.figure(figsize=(16, 10))
         sns.scatterplot(
             x="umap-2d-one", y="umap-2d-two",
-            palette=sns.color_palette("hls", 8),
+            palette=sns.color_palette("hls", len(np.unique(latent_labels))),
             hue="color",
             data=data_umap,
             legend="full",

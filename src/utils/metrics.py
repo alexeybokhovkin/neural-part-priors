@@ -68,13 +68,14 @@ def grid_chamfer_distance_by_part(gt_tree, pred_tree, voxel_transform):
         output_dict[thr] = [children_metric]
     return output_dict
 
-def grid_chamfer_distance_object(gt_tree, pred_tree):
+def grid_chamfer_distance_object(gt_tree, pred_tree, voxel_transform):
     grid = (0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7)
     output_dict = {}
     gt_leaves = [gt_tree.root]
     pred_leaves = [pred_tree.root]
     for thr in grid:
-        metric = chamfer_distance_by_part_metric(gt_leaves, pred_leaves, thr=thr)
+        metric = chamfer_distance_by_part_metric(gt_leaves, pred_leaves,
+                                                 thr=thr, voxel_transform=voxel_transform)
         output_dict[thr] = [metric]
     return output_dict
 
@@ -214,6 +215,17 @@ def grid_iou_by_part(gt_tree, pred_tree):
     for thr in grid:
         children_metric = iou_by_part_metric(gt_tree.root.children, pred_tree.root.children, thr=thr)
         output_dict[thr] = [children_metric]
+    return output_dict
+
+
+def grid_iou_object(gt_tree, pred_tree):
+    grid = (0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7)
+    output_dict = {}
+    gt_leaves = [gt_tree.root]
+    pred_leaves = [pred_tree.root]
+    for thr in grid:
+        metric = iou_by_part_metric(gt_leaves, pred_leaves, thr=thr)
+        output_dict[thr] = [metric]
     return output_dict
 
 

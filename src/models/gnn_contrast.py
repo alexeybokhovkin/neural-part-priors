@@ -9,6 +9,7 @@ import pickle
 from ..data_utils.hierarchy import Tree
 from ..utils.gnn import linear_assignment
 from ..buildingblocks import ConvDecoder
+from ..utils.losses import total_variation_loss, IoULoss
 
 
 class LeafClassifier(nn.Module):
@@ -43,14 +44,30 @@ class NumChildrenClassifier(nn.Module):
 
 class LatentDecoder(nn.Module):
 
-    def __init__(self, feature_size, hidden_size):
+    def __init__(self, feature_size, hidden_size, feature_out_size):
         super(LatentDecoder, self).__init__()
         self.mlp1 = nn.Linear(feature_size, hidden_size)
-        self.mlp2 = nn.Linear(hidden_size, feature_size)
+        self.mlp2 = nn.Linear(hidden_size, feature_out_size)
 
     def forward(self, x):
         x = torch.relu(self.mlp1(x))
         x = torch.relu(self.mlp2(x))
+
+        return x
+
+
+class LatentProjector(nn.Module):
+
+    def __init__(self, feature_size, hidden_size):
+        super(LatentProjector, self).__init__()
+        self.mlp1 = nn.Linear(feature_size, hidden_size)
+        self.mlp2 = nn.Linear(hidden_size, hidden_size)
+        self.mlp3 = nn.Linear(hidden_size, feature_size)
+
+    def forward(self, x):
+        x = torch.relu(self.mlp1(x))
+        x = torch.relu(self.mlp2(x))
+        x = self.mlp3(x)
 
         return x
 
@@ -71,11 +88,25 @@ class NodeDecoder(nn.Module):
         self.activation = nn.Sigmoid()
 
         if encode_mask:
-            self.mask_mlp = nn.Linear(2*node_feat_len, geo_feat_len)
+            # self.mask_mlp = nn.Linear(2 * node_feat_len, geo_feat_len)
+            # self.mask_mlp = nn.Sequential(nn.Linear(2 * node_feat_len, 2 * geo_feat_len),
+            #                               nn.ReLU())
+            self.mask_mlp = nn.Sequential(nn.Linear(2 * node_feat_len, geo_feat_len),
+                                          nn.ReLU())
+
+        ###################
+        # self.mask_code_mlp = nn.Sequential(
+        #     nn.Linear(2 * node_feat_len, geo_feat_len),
+        #     nn.ReLU()
+        # )
+        ###################
 
     def forward(self, x, mask_code=None, mask_feature=None):
         geo_feat = self.mlp(x)
         if mask_code is not None:
+            ####################
+            # mask_code = self.mask_code_mlp(mask_code)
+            ####################
             geo_feat = torch.cat([geo_feat, mask_code.repeat(geo_feat.shape[0], 1)], dim=1)
             geo_feat = self.mask_mlp(geo_feat)
         geo_mask, decoder_features = self.part_decoder(geo_feat, mask_feature)
@@ -200,6 +231,8 @@ class PartDecoder(nn.Module):
     def forward(self, x, mask_feature=None):
 
         x = x[..., None, None, None]
+        # x = torch.reshape(x, (1, -1, 2, 2, 2))
+        # print('Geo', x.shape)
         decoder_features = None
         if self.encode_mask:
             x, decoder_features = self.geo_decoder(x, mask_feature)
@@ -222,9 +255,9 @@ class GNNChildDecoder(nn.Module):
         self.num_iterations = num_iterations
         self.edge_type_num = edge_type_num
 
-        # self.mlp_parent = nn.Linear(node_feat_size, hidden_size * max_child_num)
+        self.mlp_parent = nn.Linear(node_feat_size, hidden_size * max_child_num)
         # ==================================
-        self.mlp_parent = nn.Linear(node_feat_size + 26, hidden_size * max_child_num)
+        # self.mlp_parent = nn.Linear(node_feat_size + 26, hidden_size * max_child_num)
         # ==================================
 
         self.mlp_exists = nn.Linear(hidden_size, 1)
@@ -247,7 +280,7 @@ class GNNChildDecoder(nn.Module):
         feat_size = parent_feature.shape[1]
 
         # ==================================
-        parent_feature = torch.cat([parent_feature, gt_children_code, gt_num_code], dim=1)
+        # parent_feature = torch.cat([parent_feature, gt_children_code, gt_num_code], dim=1)
         # ==================================
 
         parent_feature = torch.relu(self.mlp_parent(parent_feature))
@@ -400,7 +433,8 @@ class RecursiveDecoder(nn.Module):
         self.max_child_num = max_child_num
         self.split_enc_children = split_enc_children
 
-        self.latent_decoder = LatentDecoder(feature_size, hidden_size)
+        # self.latent_decoder = LatentDecoder(2 * feature_size, hidden_size, hidden_size)
+        self.latent_decoder = LatentDecoder(feature_size, hidden_size, hidden_size)
         self.node_decoder_prior = NodeDecoderPrior(geo_feature_size, feature_size, dec_in_f_maps, dec_out_f_maps,
                                                    num_convs_per_block, layer_order, num_groups, scale_factors,
                                                    dec_conv_kernel_sizes, dec_strides, dec_paddings, encode_mask,
@@ -428,39 +462,41 @@ class RecursiveDecoder(nn.Module):
         self.bceLoss = nn.BCELoss(reduction='none')
         self.semCELoss = nn.CrossEntropyLoss(reduction='none')
         self.childrenCELoss = nn.CrossEntropyLoss()
+        self.iouLoss = IoULoss()
+        self.L1Loss = nn.L1Loss()
 
         self.enc_hier = enc_hier
 
         # ========================================================
-        self.gt_label_encoder = nn.Linear(Tree.num_sem, 16)
-        self.latent_sem_encoder = nn.Linear(feature_size + 16, feature_size)
-        self.gt_label_full_encoder = nn.Linear(32, 16)
-
-        self.root_geo = None
-        self.children_geos = []
+        # self.gt_label_encoder = nn.Linear(Tree.num_sem, 16)
+        # self.latent_sem_encoder = nn.Linear(feature_size + 16, feature_size)
+        # self.gt_label_full_encoder = nn.Linear(32, 16)
+        #
+        # self.root_geo = None
+        # self.children_geos = []
         # ========================================================
 
     def isLeafLossEstimator(self, is_leaf_logit, gt_is_leaf):
         return self.bceLoss(is_leaf_logit, gt_is_leaf).view(-1)
 
     # decode a root code into a tree structure
-    def decode_structure(self, z, max_depth, mask_code=None, mask_feature=None, scan_geo=None, full_label=None,
-                         encoder_features=None, rotation=None, gt_tree=None):
+    def decode_structure(self, z, max_depth, mask_code=None, mask_feature=None, full_label=None,
+                         encoder_features=None, rotation=None, gt_tree=None, scan_geo=None):
         root_latent = self.latent_decoder(z)  # torch.Tensor[bsize, 256], torch.Tensor[bsize, 256]
         if full_label is None:
             full_label = Tree.root_sem
-        root, S_priors, rotation, child_nodes = self.decode_node(root_latent, max_depth, full_label=full_label, level=0,
-                                                    mask_code=mask_code, mask_feature=mask_feature, scan_geo=scan_geo,
-                                                    encoder_features=encoder_features, rotation=rotation,
-                                                    gt_tree=gt_tree)
+        root, S_priors, rotation, child_feats, child_feats_exist = self.decode_node(root_latent, max_depth, full_label=full_label, level=0,
+                                                                                    mask_code=mask_code, mask_feature=mask_feature,
+                                                                                    encoder_features=encoder_features, rotation=rotation,
+                                                                                    gt_tree=gt_tree, scan_geo=scan_geo)
 
         obj = Tree(root=root)
-        return obj, S_priors, rotation, child_nodes
+        return obj, S_priors, rotation, child_feats, child_feats_exist
 
     # decode a part node
     def decode_node(self, node_latent, max_depth, full_label, is_leaf=False, level=0, mask_code=None,
-                    mask_feature=None, child_sem_logit=None, scan_geo=None, encoder_features=None, rotation=None,
-                    pred_rotation=None, gt_sem_code=None, gt_tree=None):
+                    mask_feature=None, child_sem_logit=None, encoder_features=None, rotation=None,
+                    pred_rotation=None, gt_sem_code=None, gt_tree=None, scan_geo=None):
         if self.split_subnetworks:
             if level < 1:
                 clip_level = level
@@ -521,33 +557,33 @@ class RecursiveDecoder(nn.Module):
         else:
 
             # ======================
-            child_gt_sem_embeddings = []
-            for j, child_node in enumerate(gt_tree.root.children):
-                child_gt_sem_vector = torch.zeros((1, Tree.num_sem))
-                child_gt_sem_vector[0, child_node.get_semantic_id()] = 1
-                child_gt_sem_vector = child_gt_sem_vector.to(cuda_device)
-                child_gt_sem_embedding = self.gt_label_encoder(child_gt_sem_vector)
-                child_gt_sem_embeddings += [child_gt_sem_embedding]
-            num_gt_children = len(child_gt_sem_embeddings)
-            if num_gt_children >= 2:
-                child_gt_sem_full_embedding = self.gt_label_full_encoder(
-                    torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[1]], dim=1))
-            else:
-                child_gt_sem_full_embedding = self.gt_label_full_encoder(
-                    torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[0]], dim=1))
-            if num_gt_children > 2:
-                for j in range(num_gt_children - 2):
-                    child_gt_sem_full_embedding = self.gt_label_full_encoder(
-                        torch.cat([child_gt_sem_full_embedding, child_gt_sem_embeddings[j + 2]], dim=1))
-            child_gt_num_vector = torch.zeros((1, 10))
-            child_gt_num_vector[0, num_gt_children] = 1
-            child_gt_num_vector = child_gt_num_vector.to(cuda_device)
+            # child_gt_sem_embeddings = []
+            # for j, child_node in enumerate(gt_tree.root.children):
+            #     child_gt_sem_vector = torch.zeros((1, Tree.num_sem))
+            #     child_gt_sem_vector[0, child_node.get_semantic_id()] = 1
+            #     child_gt_sem_vector = child_gt_sem_vector.to(cuda_device)
+            #     child_gt_sem_embedding = self.gt_label_encoder(child_gt_sem_vector)
+            #     child_gt_sem_embeddings += [child_gt_sem_embedding]
+            # num_gt_children = len(child_gt_sem_embeddings)
+            # if num_gt_children >= 2:
+            #     child_gt_sem_full_embedding = self.gt_label_full_encoder(
+            #         torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[1]], dim=1))
+            # else:
+            #     child_gt_sem_full_embedding = self.gt_label_full_encoder(
+            #         torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[0]], dim=1))
+            # if num_gt_children > 2:
+            #     for j in range(num_gt_children - 2):
+            #         child_gt_sem_full_embedding = self.gt_label_full_encoder(
+            #             torch.cat([child_gt_sem_full_embedding, child_gt_sem_embeddings[j + 2]], dim=1))
+            # child_gt_num_vector = torch.zeros((1, 10))
+            # child_gt_num_vector[0, num_gt_children] = 1
+            # child_gt_num_vector = child_gt_num_vector.to(cuda_device)
             # ======================
 
-            child_feats, child_sem_logits, child_exists_logit, edge_exists_logits = \
-                self.child_decoders[clip_level](node_latent, child_gt_sem_full_embedding, child_gt_num_vector)
             # child_feats, child_sem_logits, child_exists_logit, edge_exists_logits = \
-            #     self.child_decoders[clip_level](node_latent)
+            #     self.child_decoders[clip_level](node_latent, child_gt_sem_full_embedding, child_gt_num_vector)
+            child_feats, child_sem_logits, child_exists_logit, edge_exists_logits = \
+                self.child_decoders[clip_level](node_latent)
             # torch.Tensor[bsize, max_child_num, 256]
             # torch.Tensor[bsize, max_child_num, tree.num_sem]
             # torch.Tensor[bsize, max_child_num, 1]
@@ -560,26 +596,28 @@ class RecursiveDecoder(nn.Module):
             child_nodes = []  # list[exist_child_num]<Tree.Node>
             child_idx = {}
             all_geo_features = []
+            child_feats_exist = []
             for ci in range(child_feats.shape[1]):
                 if torch.sigmoid(child_exists_logit[:, ci, :]).item() > 0.5:
                     idx = np.argmax(child_sem_logits_numpy[ci, Tree.part_name2cids[full_label]])  # int
                     idx = Tree.part_name2cids[full_label][idx]  # int (1 <= idx <= tree.num_sem)
                     child_full_label = Tree.part_id2name[idx]
-                    # child_node, geo_feature = self.decode_node(
-                    #     child_feats[:, ci, :], max_depth - 1, child_full_label,
-                    #     is_leaf=(child_full_label not in Tree.part_non_leaf_sem_names), level=level + 1,
-                    #     mask_code=mask_code, mask_feature=mask_feature, child_sem_logit=child_sem_logits[0, ci, :],
-                    #     scan_geo=scan_geo, encoder_features=encoder_features, rotation=rotation,
-                    #     pred_rotation=pred_rotation)
                     child_node, geo_feature, _, _ = self.decode_node(
                         child_feats[:, ci, :], max_depth - 1, child_full_label,
                         is_leaf=(child_full_label not in Tree.part_non_leaf_sem_names), level=level + 1,
                         mask_code=mask_code, mask_feature=mask_feature, child_sem_logit=child_sem_logits[0, ci, :],
-                        scan_geo=scan_geo, encoder_features=encoder_features, rotation=rotation,
-                        pred_rotation=pred_rotation, gt_tree=gt_tree, gt_sem_code=gt_sem_code)
+                        encoder_features=encoder_features, rotation=rotation, scan_geo=scan_geo,
+                        pred_rotation=pred_rotation)
+                    # child_node, geo_feature, _, _ = self.decode_node(
+                    #     child_feats[:, ci, :], max_depth - 1, child_full_label,
+                    #     is_leaf=(child_full_label not in Tree.part_non_leaf_sem_names), level=level + 1,
+                    #     mask_code=mask_code, mask_feature=mask_feature, child_sem_logit=child_sem_logits[0, ci, :],
+                    #     encoder_features=encoder_features, rotation=rotation, scan_geo=scan_geo,
+                    #     pred_rotation=pred_rotation, gt_tree=gt_tree, gt_sem_code=gt_sem_code)
                     child_nodes.append(child_node)
                     all_geo_features.append(geo_feature)
                     child_idx[ci] = len(child_nodes) - 1
+                    child_feats_exist.append(child_feats[:, ci, :])
 
             # edges
             child_edges = []  # list[<=nnz_num]<dict['part_a', 'part_b', 'type']>
@@ -599,29 +637,59 @@ class RecursiveDecoder(nn.Module):
                         'part_b': child_idx[cur_edge_to],
                         'type': self.edge_types[cur_edge_type]})
 
+            child_feats_exist = torch.cat(child_feats_exist)
+
             return Tree.Node(is_leaf=False, children=child_nodes, edges=child_edges,
-                             full_label=full_label, label=full_label.split('/')[-1], geo=geo_mask), [0], 0, child_feats
+                             full_label=full_label, label=full_label.split('/')[-1], geo=geo_mask), \
+                   [0], 0, child_feats, child_feats_exist
+
+    def decode_from_latents(self, z, leaf_latents, mask_code=None, mask_feature=None,
+                            children_names=None):
+        root_latent = self.latent_decoder(z)
+
+        class_name = Tree.root_sem
+        leaf_nodes = []
+        for i, leaf_latent in enumerate(leaf_latents):
+            full_label = class_name + '/' + children_names[i]
+            geo_mask, geo_feature, _ = self.node_decoders[-1](leaf_latent[None, ...], mask_code, mask_feature)
+            leaf_node = Tree.Node(is_leaf=True, full_label=full_label, label=children_names[i], geo=geo_mask)
+            leaf_nodes += [leaf_node]
+
+        geo_mask, geo_feature, _ = self.node_decoders[-1](root_latent, mask_code, mask_feature)
+        root_node = Tree.Node(is_leaf=False, children=leaf_nodes, full_label=class_name, label=class_name, geo=geo_mask)
+
+        return Tree(root=root_node)
 
     def structure_recon_loss(self, z, gt_tree, children_roots=None, mask_code=None, mask_feature=None,
                              scan_geo=None, encoder_features=None, rotation=None):
         root_latent = self.latent_decoder(z)  # torch.Tensor[bsize, 256], torch.Tensor[bsize, 256]
         output = self.node_recon_loss_latentless(root_latent, gt_tree.root, 0, children_roots,
-                                                 mask_code, mask_feature, scan_geo=scan_geo,
-                                                 encoder_features=encoder_features, rotation=rotation)
+                                                 mask_code, mask_feature,
+                                                 encoder_features=encoder_features, rotation=rotation,
+                                                 scan_geo=scan_geo)
         return output
 
     def tto_recon_loss(self, z, gt_tree, children_roots=None, mask_code=None, mask_feature=None,
-                             scan_geo=None, encoder_features=None, rotation=None):
+                       scan_geo=None, encoder_features=None, rotation=None, scan_sdf=None,
+                       predicted_tree=None):
         root_latent = self.latent_decoder(z)  # torch.Tensor[bsize, 256], torch.Tensor[bsize, 256]
         output = self.tto_loss(root_latent, gt_tree.root, 0, children_roots,
                                mask_code, mask_feature, scan_geo=scan_geo,
-                               encoder_features=encoder_features, rotation=rotation)
+                               encoder_features=encoder_features, rotation=rotation,
+                               scan_sdf=scan_sdf, predicted_tree=predicted_tree)
+        return output
+
+    def tto_leaves_recon_loss(self, z, children_latents, mask_code=None, mask_feature=None,
+                              scan_geo=None, scan_sdf=None, predicted_tree=None):
+        root_latent = self.latent_decoder(z)
+        output = self.tto_leaves_loss(root_latent, children_latents, mask_code, mask_feature,
+                                      scan_geo=scan_geo, scan_sdf=scan_sdf, predicted_tree=predicted_tree)
         return output
 
     def node_recon_loss_latentless(self, node_latent, gt_node, level=0, children_roots=None,
                                    mask_code=None, mask_feature=None, child_sem_logit=None,
-                                   scan_geo=None, encoder_features=None, rotation=None, pred_rotation=None,
-                                   gt_sem_code=None):
+                                   encoder_features=None, rotation=None, pred_rotation=None,
+                                   gt_sem_code=None, scan_geo=None):
         if self.split_subnetworks:
             if level < 1:
                 clip_level = level
@@ -661,6 +729,7 @@ class RecursiveDecoder(nn.Module):
         geo_mask, geo_feat, decoder_features = self.node_decoders[clip_level](node_latent, mask_code, mask_feature)
         S_prior = torch.zeros_like(gt_geo)[None, ...]
         geo_loss = self.voxelLoss(geo_mask[:, 0, ...], gt_geo).mean()
+        # geo_loss = self.voxelLoss(geo_mask[:, 0, ...], gt_geo).mean() + 5 * self.iouLoss(geo_mask[:, 0, ...], gt_geo).mean()
 
         if gt_node.is_leaf:
             loss_dict = {}
@@ -681,32 +750,32 @@ class RecursiveDecoder(nn.Module):
         else:
 
             # ======================
-            child_gt_sem_embeddings = []
-            for j, child_node in enumerate(gt_node.children):
-                child_gt_sem_vector = torch.zeros((1, Tree.num_sem))
-                child_gt_sem_vector[0, child_node.get_semantic_id()] = 1
-                child_gt_sem_vector = child_gt_sem_vector.to(cuda_device)
-                child_gt_sem_embedding = self.gt_label_encoder(child_gt_sem_vector)
-                child_gt_sem_embeddings += [child_gt_sem_embedding]
-            num_gt_children = len(child_gt_sem_embeddings)
-            if num_gt_children >= 2:
-                child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[1]], dim=1))
-            else:
-                child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[0]], dim=1))
-            if num_gt_children > 2:
-                for j in range(num_gt_children - 2):
-                    child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_full_embedding, child_gt_sem_embeddings[j + 2]], dim=1))
-            child_gt_num_vector = torch.zeros((1, 10))
-            child_gt_num_vector[0, num_gt_children] = 1
-            child_gt_num_vector = child_gt_num_vector.to(cuda_device)
+            # child_gt_sem_embeddings = []
+            # for j, child_node in enumerate(gt_node.children):
+            #     child_gt_sem_vector = torch.zeros((1, Tree.num_sem))
+            #     child_gt_sem_vector[0, child_node.get_semantic_id()] = 1
+            #     child_gt_sem_vector = child_gt_sem_vector.to(cuda_device)
+            #     child_gt_sem_embedding = self.gt_label_encoder(child_gt_sem_vector)
+            #     child_gt_sem_embeddings += [child_gt_sem_embedding]
+            # num_gt_children = len(child_gt_sem_embeddings)
+            # if num_gt_children >= 2:
+            #     child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[1]], dim=1))
+            # else:
+            #     child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[0]], dim=1))
+            # if num_gt_children > 2:
+            #     for j in range(num_gt_children - 2):
+            #         child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_full_embedding, child_gt_sem_embeddings[j + 2]], dim=1))
+            # child_gt_num_vector = torch.zeros((1, 10))
+            # child_gt_num_vector[0, num_gt_children] = 1
+            # child_gt_num_vector = child_gt_num_vector.to(cuda_device)
             # ======================
 
 
             loss_dict = {}
-            # child_feats, child_sem_logits, child_exists_logits, edge_exists_logits = \
-            #     self.child_decoders[clip_level](node_latent)
             child_feats, child_sem_logits, child_exists_logits, edge_exists_logits = \
-                self.child_decoders[clip_level](node_latent, child_gt_sem_full_embedding, child_gt_num_vector)
+                self.child_decoders[clip_level](node_latent)
+            # child_feats, child_sem_logits, child_exists_logits, edge_exists_logits = \
+            #     self.child_decoders[clip_level](node_latent, child_gt_sem_full_embedding, child_gt_num_vector)
 
             all_geo = []
             all_gt_geo = []
@@ -811,15 +880,15 @@ class RecursiveDecoder(nn.Module):
             pred2allgeo = dict()
             pred2allleafgeo = dict()
             for i in range(len(matched_gt_idx)):
-                # child_losses, child_all_geo, child_all_leaf_geo, child_all_gt_geo, child_all_geo_features, child_all_leaf_S_priors, child_decoder_features = self.node_recon_loss_latentless(
-                #     child_feats[:, matched_pred_idx[i], :], gt_node.children[matched_gt_idx[i]], level + 1,
-                #     children_roots, mask_code, mask_feature, child_sem_pred_logits[i], scan_geo=scan_geo,
-                #     encoder_features=encoder_features, rotation=rotation, pred_rotation=pred_rotation)
                 child_losses, child_all_geo, child_all_leaf_geo, child_all_gt_geo, child_all_geo_features, child_all_leaf_S_priors, child_decoder_features = self.node_recon_loss_latentless(
                     child_feats[:, matched_pred_idx[i], :], gt_node.children[matched_gt_idx[i]], level + 1,
                     children_roots, mask_code, mask_feature, child_sem_pred_logits[i], scan_geo=scan_geo,
-                    encoder_features=encoder_features, rotation=rotation, pred_rotation=pred_rotation,
-                    gt_sem_code=child_gt_sem_embeddings[matched_gt_idx[i]])
+                    encoder_features=encoder_features, rotation=rotation, pred_rotation=pred_rotation)
+                # child_losses, child_all_geo, child_all_leaf_geo, child_all_gt_geo, child_all_geo_features, child_all_leaf_S_priors, child_decoder_features = self.node_recon_loss_latentless(
+                #     child_feats[:, matched_pred_idx[i], :], gt_node.children[matched_gt_idx[i]], level + 1,
+                #     children_roots, mask_code, mask_feature, child_sem_pred_logits[i], scan_geo=scan_geo,
+                #     encoder_features=encoder_features, rotation=rotation, pred_rotation=pred_rotation,
+                #     gt_sem_code=child_gt_sem_embeddings[matched_gt_idx[i]])
 
                 pred2allgeo[matched_pred_idx[i]] = child_all_geo
                 pred2allleafgeo[matched_pred_idx[i]] = child_all_leaf_geo
@@ -851,10 +920,39 @@ class RecursiveDecoder(nn.Module):
             return loss_dict, torch.cat(all_geo, dim=0), torch.cat(all_leaf_geo, dim=0), torch.cat(all_leaf_S_priors, dim=0), \
                    child_feats_output, child_sem_pred_logits, all_child_decoder_features, child_sem_gt_labels
 
+    def tto_leaves_loss(self, root_latent, children_latents, mask_code=None, mask_feature=None, scan_geo=None, scan_sdf=None, predicted_tree=None):
+        geo_mask, geo_feat, decoder_features = self.node_decoders[-1](root_latent, mask_code, mask_feature)
+        loss_tv = total_variation_loss(geo_mask)
+
+        root_geo_initial = predicted_tree.root.geo
+        visible_mask = torch.zeros_like(scan_sdf)
+        visible_mask[scan_sdf >= -0.05] = 1
+        geo_loss_visible = self.voxelLoss(visible_mask * geo_mask[:, 0, ...],
+                                          visible_mask * scan_geo[:, 0, ...]).mean()
+        geo_loss_invisible = self.voxelLoss((1 - visible_mask) * geo_mask[:, 0, ...],
+                                            (1 - visible_mask) * root_geo_initial[:, 0, ...]).mean()
+        geo_loss = geo_loss_visible + geo_loss_invisible
+        root_geo = geo_mask.detach()
+
+        children_geos = []
+        for i in range(len(children_latents)):
+            child_geo_mask, geo_feat, decoder_features = self.node_decoders[-1](children_latents[i][None, ...], mask_code, mask_feature)
+            loss_tv = loss_tv + total_variation_loss(child_geo_mask)
+            children_geos += [child_geo_mask]
+
+        loss_dict = {}
+        loss_dict['geo'] = geo_loss
+        # loss_dict['tv'] = loss_tv
+
+        geo_children_loss = self.voxelLoss(torch.clamp(torch.sum(torch.stack(children_geos), dim=0), 0, 1), root_geo).mean()
+        loss_dict['geo_children'] = geo_children_loss
+
+        return loss_dict
+
     def tto_loss(self, node_latent, gt_node, level=0, children_roots=None,
-                                   mask_code=None, mask_feature=None, child_sem_logit=None,
-                                   scan_geo=None, encoder_features=None, rotation=None, pred_rotation=None,
-                                   gt_sem_code=None):
+                 mask_code=None, mask_feature=None, child_sem_logit=None,
+                 scan_geo=None, encoder_features=None, rotation=None, pred_rotation=None,
+                 gt_sem_code=None, scan_sdf=None, predicted_tree=None):
         if self.split_subnetworks:
             if level < 1:
                 clip_level = level
@@ -883,10 +981,48 @@ class RecursiveDecoder(nn.Module):
 
         geo_mask, geo_feat, decoder_features = self.node_decoders[clip_level](node_latent, mask_code, mask_feature)
         S_prior = torch.zeros_like(gt_geo)[None, ...]
+
+        loss_tv = total_variation_loss(geo_mask)
+
         if level == 0:
-            geo_loss = self.voxelLoss(geo_mask[:, 0, ...], scan_geo[0]).mean()
+            root_geo_initial = predicted_tree.root.geo
+            root_geo_initial_thr = torch.zeros_like(root_geo_initial)
+            root_geo_initial_thr[root_geo_initial > 0.4] = 1
+
+            visible_mask = torch.zeros_like(scan_sdf)
+            visible_mask[scan_sdf >= -0.05] = 1
+
+            geo_loss_visible = self.voxelLoss(visible_mask * geo_mask,
+                                              visible_mask * scan_geo).mean()
+            geo_loss_invisible = self.voxelLoss((1 - visible_mask) * geo_mask,
+                                                (1 - visible_mask) * root_geo_initial_thr).mean()
+            # geo_loss = 10 * geo_loss_visible + geo_loss_invisible
+            geo_loss = 10 * self.voxelLoss(visible_mask * geo_mask, visible_mask * scan_geo).mean()
+            # geo_loss = 10 * self.L1Loss(visible_mask * geo_mask, visible_mask * scan_geo).mean()
+            # geo_loss = 10 * self.voxelLoss(visible_mask * geo_mask, visible_mask * scan_geo).mean() + 5.0 * self.iouLoss(visible_mask * geo_mask, visible_mask * scan_geo).mean()
+            # geo_loss = 10 * self.L1Loss(visible_mask * geo_mask, visible_mask * scan_geo).mean() + 5.0 * self.iouLoss(visible_mask * geo_mask, visible_mask * scan_geo).mean()
+            root_geo = geo_mask.detach()
+
+            # geo_loss = self.voxelLoss(geo_mask, gt_geo[None, ...]).mean() + 5.0 * self.iouLoss(geo_mask, gt_geo[None, ...]).mean()
+            # root_geo = geo_mask.detach()
         else:
-            # self.children_geos += [geo_mask]
+            # with torch.no_grad():
+            #     children_geos_initial = torch.cat([x.geo for x in predicted_tree.root.children])
+            #     geo_mask_tiled = geo_mask.repeat(len(children_geos_initial), 1, 1, 1, 1).to(cuda_device).detach()
+            #     dist_mat = self.voxelLoss(geo_mask_tiled,
+            #                               children_geos_initial).mean((2, 3, 4))[None, ...]
+            #     _, matched_gt_idx, matched_pred_idx = linear_assignment(dist_mat)
+            #     gt2pred = {gt_idx: pred_idx for gt_idx, pred_idx in zip(matched_gt_idx, matched_pred_idx)}
+            #     gt_matched_id = list(gt2pred.keys())[0]
+            #     children_geo_matched = children_geos_initial[gt_matched_id][None, ...]
+            # visible_mask = torch.zeros_like(scan_sdf)
+            # visible_mask[scan_sdf >= -0.05] = 1
+            # geo_loss_visible = self.voxelLoss(visible_mask * geo_mask[:, 0, ...],
+            #                                   visible_mask * scan_geo[:, 0, ...]).mean()
+            # geo_loss_invisible = self.voxelLoss((1 - visible_mask) * geo_mask[:, 0, ...],
+            #                                     (1 - visible_mask) * children_geo_matched[:, 0, ...]).mean()
+            # geo_loss = geo_loss_visible + geo_loss_invisible
+
             geo_loss = 0
 
         if gt_node.is_leaf:
@@ -904,36 +1040,38 @@ class RecursiveDecoder(nn.Module):
             loss_dict['edge_exists'] = torch.zeros_like(is_leaf_loss)
             loss_dict['root_cls'] = root_cls_loss
 
+            # loss_dict['tv'] = loss_tv
+
             return loss_dict, geo_mask, geo_mask, gt_geo, geo_feat, S_prior, decoder_features
         else:
 
             # ======================
-            child_gt_sem_embeddings = []
-            for j, child_node in enumerate(gt_node.children):
-                child_gt_sem_vector = torch.zeros((1, Tree.num_sem))
-                child_gt_sem_vector[0, child_node.get_semantic_id()] = 1
-                child_gt_sem_vector = child_gt_sem_vector.to(cuda_device)
-                child_gt_sem_embedding = self.gt_label_encoder(child_gt_sem_vector)
-                child_gt_sem_embeddings += [child_gt_sem_embedding]
-            num_gt_children = len(child_gt_sem_embeddings)
-            if num_gt_children >= 2:
-                child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[1]], dim=1))
-            else:
-                child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[0]], dim=1))
-            if num_gt_children > 2:
-                for j in range(num_gt_children - 2):
-                    child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_full_embedding, child_gt_sem_embeddings[j + 2]], dim=1))
-            child_gt_num_vector = torch.zeros((1, 10))
-            child_gt_num_vector[0, num_gt_children] = 1
-            child_gt_num_vector = child_gt_num_vector.to(cuda_device)
+            # child_gt_sem_embeddings = []
+            # for j, child_node in enumerate(gt_node.children):
+            #     child_gt_sem_vector = torch.zeros((1, Tree.num_sem))
+            #     child_gt_sem_vector[0, child_node.get_semantic_id()] = 1
+            #     child_gt_sem_vector = child_gt_sem_vector.to(cuda_device)
+            #     child_gt_sem_embedding = self.gt_label_encoder(child_gt_sem_vector)
+            #     child_gt_sem_embeddings += [child_gt_sem_embedding]
+            # num_gt_children = len(child_gt_sem_embeddings)
+            # if num_gt_children >= 2:
+            #     child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[1]], dim=1))
+            # else:
+            #     child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_embeddings[0], child_gt_sem_embeddings[0]], dim=1))
+            # if num_gt_children > 2:
+            #     for j in range(num_gt_children - 2):
+            #         child_gt_sem_full_embedding = self.gt_label_full_encoder(torch.cat([child_gt_sem_full_embedding, child_gt_sem_embeddings[j + 2]], dim=1))
+            # child_gt_num_vector = torch.zeros((1, 10))
+            # child_gt_num_vector[0, num_gt_children] = 1
+            # child_gt_num_vector = child_gt_num_vector.to(cuda_device)
             # ======================
 
 
             loss_dict = {}
-            # child_feats, child_sem_logits, child_exists_logits, edge_exists_logits = \
-            #     self.child_decoders[clip_level](node_latent)
             child_feats, child_sem_logits, child_exists_logits, edge_exists_logits = \
-                self.child_decoders[clip_level](node_latent, child_gt_sem_full_embedding, child_gt_num_vector)
+                self.child_decoders[clip_level](node_latent)
+            # child_feats, child_sem_logits, child_exists_logits, edge_exists_logits = \
+            #     self.child_decoders[clip_level](node_latent, child_gt_sem_full_embedding, child_gt_num_vector)
 
             all_geo = []
             all_gt_geo = []
@@ -1038,15 +1176,16 @@ class RecursiveDecoder(nn.Module):
             pred2allgeo = dict()
             pred2allleafgeo = dict()
             for i in range(len(matched_gt_idx)):
-                # child_losses, child_all_geo, child_all_leaf_geo, child_all_gt_geo, child_all_geo_features, child_all_leaf_S_priors, child_decoder_features = self.tto_loss(
-                #     child_feats[:, matched_pred_idx[i], :], gt_node.children[matched_gt_idx[i]], level + 1,
-                #     children_roots, mask_code, mask_feature, child_sem_pred_logits[i], scan_geo=scan_geo,
-                #     encoder_features=encoder_features, rotation=rotation, pred_rotation=pred_rotation)
                 child_losses, child_all_geo, child_all_leaf_geo, child_all_gt_geo, child_all_geo_features, child_all_leaf_S_priors, child_decoder_features = self.tto_loss(
                     child_feats[:, matched_pred_idx[i], :], gt_node.children[matched_gt_idx[i]], level + 1,
                     children_roots, mask_code, mask_feature, child_sem_pred_logits[i], scan_geo=scan_geo,
-                    encoder_features=encoder_features, rotation=rotation, pred_rotation=pred_rotation,
-                    gt_sem_code=child_gt_sem_embeddings[matched_gt_idx[i]])
+                    encoder_features=encoder_features, rotation=rotation, pred_rotation=pred_rotation, scan_sdf=scan_sdf, predicted_tree=predicted_tree)
+                # child_losses, child_all_geo, child_all_leaf_geo, child_all_gt_geo, child_all_geo_features, child_all_leaf_S_priors, child_decoder_features = self.tto_loss(
+                #     child_feats[:, matched_pred_idx[i], :], gt_node.children[matched_gt_idx[i]], level + 1,
+                #     children_roots, mask_code, mask_feature, child_sem_pred_logits[i], scan_geo=scan_geo,
+                #     encoder_features=encoder_features, rotation=rotation, pred_rotation=pred_rotation,
+                #     gt_sem_code=child_gt_sem_embeddings[matched_gt_idx[i]], scan_sdf=scan_sdf,
+                #     predicted_tree=predicted_tree)
 
                 pred2allgeo[matched_pred_idx[i]] = child_all_geo
                 pred2allleafgeo[matched_pred_idx[i]] = child_all_leaf_geo
@@ -1064,6 +1203,7 @@ class RecursiveDecoder(nn.Module):
                 child_exists_loss = child_exists_loss + child_losses['exists']
                 semantic_loss = semantic_loss + child_losses['semantic']
                 edge_exists_loss = edge_exists_loss + child_losses['edge_exists']
+                # loss_tv = loss_tv + child_losses['tv']
 
             loss_dict['leaf'] = is_leaf_loss.view((1))
             loss_dict['geo'] = geo_loss.view((1))
@@ -1072,8 +1212,9 @@ class RecursiveDecoder(nn.Module):
             loss_dict['semantic'] = semantic_loss.view((1))
             loss_dict['edge_exists'] = edge_exists_loss.view((1))
             loss_dict['root_cls'] = root_cls_loss.view((1))
+            # loss_dict['tv'] = loss_tv.view((1))
 
-            geo_children_loss = self.voxelLoss(torch.clamp(torch.sum(torch.stack(all_geo), dim=0), 0, 1), scan_geo).mean()
+            geo_children_loss = self.voxelLoss(torch.clamp(torch.sum(torch.stack(all_geo), dim=0), 0, 1), root_geo).mean()
             loss_dict['geo_children'] = geo_children_loss
 
             child_feats_output = child_feats[:, matched_pred_idx, :]

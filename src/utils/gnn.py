@@ -56,12 +56,12 @@ def sym_reflect_tree(tree):
 
 def rotate_tree_geos(tree, angle):
     root_geo = tree.root.geo[0].cpu().numpy().astype('uint8')
-    rotated_root_geo = rotate(root_geo, -angle, axes=[0, 2], reshape=False).astype('float32')
+    rotated_root_geo = rotate(root_geo, angle, axes=[0, 2], reshape=False).astype('float32')
     tree.root.geo = torch.FloatTensor(rotated_root_geo)[None, ...]
 
     for i, child in enumerate(tree.root.children):
         child_geo = child.geo[0].cpu().numpy().astype('uint8')
-        rotated_child_geo = rotate(child_geo, -angle, axes=[0, 2], reshape=False).astype('float32')
+        rotated_child_geo = rotate(child_geo, angle, axes=[0, 2], reshape=False).astype('float32')
         tree.root.children[i].geo = torch.FloatTensor(rotated_child_geo)[None, ...]
 
     return tree

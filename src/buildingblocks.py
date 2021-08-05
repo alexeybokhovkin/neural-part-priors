@@ -1,5 +1,6 @@
 import torch
 from torch import nn as nn
+from torch.nn import functional as F
 
 
 def create_conv(in_channels, out_channels, kernel_size, order, num_groups, padding=1, stride=1):
@@ -110,7 +111,7 @@ class DoubleConv(nn.Sequential):
         num_groups (int): number of groups for the GroupNorm
     """
 
-    def __init__(self, in_channels, out_channels, encoder, kernel_size=3, order='crg', num_groups=8):
+    def __init__(self, in_channels, out_channels, encoder, kernel_size=3, order='crg', num_groups=8, padding=1, stride=1):
         super(DoubleConv, self).__init__()
         if encoder:
             # we're in the encoder path
@@ -126,10 +127,12 @@ class DoubleConv(nn.Sequential):
 
         # conv1
         self.add_module('SingleConv1',
-                        SingleConv(conv1_in_channels, conv1_out_channels, kernel_size, order, num_groups))
+                        SingleConv(conv1_in_channels, conv1_out_channels, kernel_size, order, num_groups,
+                                   padding=padding, stride=stride))
         # conv2
         self.add_module('SingleConv2',
-                        SingleConv(conv2_in_channels, conv2_out_channels, kernel_size, order, num_groups))
+                        SingleConv(conv2_in_channels, conv2_out_channels, kernel_size, order, num_groups,
+                                   padding=padding, stride=stride))
 
 
 class ExtResNetBlock(nn.Module):
@@ -308,6 +311,8 @@ class DeconvBlock(nn.Module):
                  output_padding=1, join=None):
         super(DeconvBlock, self).__init__()
 
+        scale_factor = tuple([scale_factor]) * 3
+        self.scale_factor = scale_factor
         self.join = join
         if basic_module == DoubleConv:
             # if DoubleConv is the basic_module use nearest neighbor interpolation for upsampling
@@ -318,7 +323,6 @@ class DeconvBlock(nn.Module):
             # (D_out = (D_in − 1) ×  stride[0] − 2 ×  padding[0] +  kernel_size[0] +  output_padding[0])
             # also scale the number of channels from in_channels to out_channels so that summation joining
             # works correctly
-            scale_factor = tuple([scale_factor]) * 3
             self.upsample = nn.ConvTranspose3d(in_channels,
                                                out_channels,
                                                kernel_size=kernel_size,
@@ -344,20 +348,29 @@ class DeconvBlock(nn.Module):
 
     def forward(self, x, feature=None):
 
-        # print('Input dec:', x.shape)
+        if self.upsample is None:
+            # print('Input dec:', x.shape)
+            # print('Scale factor:', self.scale_factor)
+            x_feature = F.interpolate(x, scale_factor=self.scale_factor, mode='trilinear')
+            # print('After up:', x_feature.shape)
+            x = self.basic_module(x_feature)
+            # print('After conv:', x.shape)
+            # print()
+        else:
 
-        x_feature = self.upsample(x)
-        # print('After up:', x.shape)
-        x = self.basic_module(x_feature)
-        # print('After conv:', x.shape)
-        if self.join == 1:
-            x = x + feature
-        elif self.join == 2:
-            # print('Feat:', feature.shape)
-            # print(x.shape)
-            x = torch.cat([x, feature], dim=1)
-        # print('After join:', x.shape)
-        # print()
+            # print('Input dec:', x.shape)
+            x_feature = self.upsample(x)
+            # print('After up:', x.shape)
+            x = self.basic_module(x_feature)
+            # print('After conv:', x.shape)
+            # if self.join == 1:
+            #     x = x + feature
+            # elif self.join == 2:
+                # print('Feat:', feature.shape)
+                # print(x.shape)
+                # x = torch.cat([x, feature], dim=1)
+            # print('After join:', x.shape)
+            # print()
 
         return x, x_feature
 
@@ -391,21 +404,22 @@ class ConvDecoder(nn.Module):
 
             decoders.append(decoder)
         self.decoders = nn.ModuleList(decoders)
-        self.decoder_last_conv = basic_module(out_feature_num, 1,
-                                              kernel_size=1,
-                                              order='c',
-                                              stride=1,
-                                              padding=0)
+        self.decoder_last_conv = SingleConv(out_feature_num, 1,
+                                            kernel_size=1,
+                                            order='c',
+                                            stride=1,
+                                            padding=0)
 
     def forward(self, x, features=None):
         x_features = []
 
         for i, decoder in enumerate(self.decoders):
             if i >= 1:
-                if i >= len(features) or not features:
-                    feature = None
-                else:
-                    feature = features[i]
+                feature = None
+                # if i >= len(features) or not features or features is None:
+                #     feature = None
+                # else:
+                #     feature = features[i]
                 x, x_feature = decoder(x, feature)
                 x_features.append(x_feature)
         if self.last_conv:
