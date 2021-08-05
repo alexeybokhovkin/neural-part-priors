@@ -135,8 +135,8 @@ def reconstruct_tto(
     optimizer_2 = torch.optim.Adam(decoder.parameters(), lr=lr_2)
 
     loss_num = 0
-    # loss_l1 = torch.nn.L1Loss(reduction='none')
-    loss_l1 = torch.nn.MSELoss(reduction='none')
+    loss_l1 = torch.nn.L1Loss(reduction='none')
+    # loss_l1 = torch.nn.MSELoss(reduction='none')
     loss_history = []
     all_latents = []
     cal_scale = float(cal_scale)
@@ -504,12 +504,12 @@ class RecursiveDeepSDFDecoder(nn.Module):
                 print(child_name, len(sdf_part))
                 err, all_latents, loss_history, pred_sdf_part, stats_before_tto, stats_after_tto = reconstruct_tto(
                     self.deepsdf_decoder,
-                    1201,
+                    801,
                     sdf_part,
                     0.1,
                     num_samples=len(sdf_part),
-                    lr_1=5e-3,
-                    lr_2=0, # 5e-4
+                    lr_1=0, # 1e-2
+                    lr_2=5e-4, # 5e-4
                     l2reg=True,
                     cal_scale=1,
                     add_feat=children_feats[i],
@@ -558,12 +558,12 @@ class RecursiveDeepSDFDecoder(nn.Module):
             print('full', len(sdf_data))
             err, all_latents, loss_history, shape_sdf_pred, shape_stats_before_tto, shape_stats_after_tto = reconstruct_tto(
                 self.deepsdf_shape_decoder,
-                1201,
+                801,
                 sdf_data,
                 0.1,
                 num_samples=len(sdf_data),
-                lr_1=5e-3,
-                lr_2=0, # 5e-4
+                lr_1=0, # 1e-2
+                lr_2=5e-4, # 5e-4
                 l2reg=True,
                 cal_scale=1,
                 add_feat=shape_feat,
