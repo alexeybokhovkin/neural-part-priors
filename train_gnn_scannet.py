@@ -66,7 +66,7 @@ def main(args):
         log_every_n_steps=config.log_every_n_steps,
         fast_dev_run=False,
         # resume_from_checkpoint=config.resume_from_checkpoint,
-        accumulate_grad_batches=4 # 48
+        accumulate_grad_batches=16 # 48
     )
     trainer.fit(model)
 
