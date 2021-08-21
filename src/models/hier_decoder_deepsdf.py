@@ -1333,7 +1333,7 @@ class RecursiveDeepSDFDecoder(nn.Module):
 
             # call children + aggregate losses
             for i in range(len(matched_gt_idx)):
-                child_losses = self.node_recon_loss_latentless(
+                child_losses = self.node_latent_loss(
                     child_feats[:, matched_pred_idx[i], :], gt_node.children[matched_gt_idx[i]], sdf_data, level + 1,
                     encoder_features=encoder_features, rotation=rotation,
                     pred_rotation=pred_rotation, parts_indices=parts_indices, epoch=epoch
