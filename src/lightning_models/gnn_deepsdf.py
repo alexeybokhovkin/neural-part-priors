@@ -181,6 +181,7 @@ class GNNPartnetLightning(pl.LightningModule):
         print('Geo:', scannet_geos.shape)
         x_roots, features = self.encoder.root_latents(scannet_geos)
         encoder_features = features
+        print('Root:', x_roots.shape)
 
         all_losses = []
 
