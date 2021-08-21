@@ -198,7 +198,7 @@ class GNNPartnetLightning(pl.LightningModule):
             #                                            noise_full=noise_full[i])
 
             # Learning latent space
-            output = self.decoder.latent_recon_loss(x_roots[i], gt_tree, sdf_parts[i],
+            output = self.decoder.latent_recon_loss(x_roots[i][None, ...], gt_tree, sdf_parts[i],
                                                     encoder_features=encoder_features[i],
                                                     rotation=0, parts_indices=parts_indices[i],
                                                     full_shape_idx=full_shape_indices[i],
