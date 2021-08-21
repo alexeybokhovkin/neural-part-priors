@@ -62,12 +62,16 @@ class LatentProjector(nn.Module):
         super(LatentProjector, self).__init__()
         self.mlp1 = nn.Linear(feature_size, hidden_size)
         self.mlp2 = nn.Linear(hidden_size, hidden_size)
-        self.mlp3 = nn.Linear(hidden_size, feature_size)
+        self.mlp3 = nn.Linear(hidden_size, hidden_size)
+        self.mlp4 = nn.Linear(hidden_size, hidden_size)
+        self.mlp5 = nn.Linear(hidden_size, feature_size)
 
     def forward(self, x):
         x = torch.relu(self.mlp1(x))
         x = torch.relu(self.mlp2(x))
-        x = self.mlp3(x)
+        x = torch.relu(self.mlp3(x))
+        x = torch.relu(self.mlp4(x))
+        x = self.mlp5(x)
 
         return x
 

@@ -555,8 +555,8 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
                 assert False, 'ERROR: unknown feat type %s!' % feat
 
         shape_sdf = torch.zeros((32, 32, 32))
-        shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet', f'{partnet_scannet_id}.npy')))
-        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_scannet', f'{partnet_scannet_id}.npy')))
+        shape_mask = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_partnetpartial', f'{partnet_scannet_id}.npy')))
+        scannet_geo = torch.FloatTensor(np.load(os.path.join(self.datadir, common_path + '_partnetpartial', f'{partnet_scannet_id}.npy')))
 
         child_names = []
         if 'object' in self.data_features:

@@ -111,20 +111,18 @@ class GNNPartnetLightning(pl.LightningModule):
         # torch.backends.cudnn.enabled = False
         # torch.backends.cudnn.deterministic = True
 
-        # with open(os.path.join(config['base'], config['checkpoint_dir'], config['model'], config['version'],
-        #                        'config.json'), 'w') as f:
-        #     json.dump(self.config, f)
+        with open(os.path.join(config['base'], config['checkpoint_dir'], config['model'], config['version'],
+                               'config.json'), 'w') as f:
+            json.dump(self.config, f)
 
     def load_deepsdf_outside(self, shape_exp_path=None, parts_exp_path=None):
         shape_dict = self.decoder.recursive_decoder.deepsdf_shape_decoder.state_dict()
         parts_dict = self.decoder.recursive_decoder.deepsdf_decoder.state_dict()
 
-        # print(shape_dict.keys())
         shape_dict_trained = torch.load(os.path.join(shape_exp_path, 'ModelParameters/latest.pth'))['model_state_dict']
         shape_latents_dict_trained = torch.load(os.path.join(shape_exp_path, 'LatentCodes/latest.pth'))['latent_codes']['weight']
         parts_dict_trained = torch.load(os.path.join(parts_exp_path, 'ModelParameters/latest.pth'))['model_state_dict']
         parts_latents_dict_trained = torch.load(os.path.join(parts_exp_path, 'LatentCodes/latest.pth'))['latent_codes']['weight']
-        # print(shape_dict_trained.keys())
 
         shape_dict_update = {k[7:]: v for k, v in shape_dict_trained.items()}
         parts_dict_update = {k[7:]: v for k, v in parts_dict_trained.items()}
@@ -174,11 +172,14 @@ class GNNPartnetLightning(pl.LightningModule):
         x_roots = []
         encoder_features = []
 
-        for i, gt_tree in enumerate(gt_trees):
-            x_root, feature = self.encoder.root_latents(scannet_geos[i][None, ...])
-            encoder_features += [feature]
+        # for i, gt_tree in enumerate(gt_trees):
+        #     x_root, feature = self.encoder.root_latents(scannet_geos[i][None, ...])
+        #     encoder_features += [feature]
+        #
+        #     x_roots += [x_root]
 
-            x_roots += [x_root]
+        x_roots, features = self.encoder.root_latents(scannet_geos)
+        encoder_features = features
 
         all_losses = []
 

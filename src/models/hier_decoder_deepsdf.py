@@ -1280,8 +1280,8 @@ class RecursiveDeepSDFDecoder(nn.Module):
             full_shape_idx = torch.tensor(full_shape_idx).to(cuda_device)
             batch_shape_vecs = self.lat_shape_vecs(full_shape_idx)[None, :]
             node_latent_projected = self.shape_latent_projector(node_latent)
-            # shape_mse_loss = self.mseLoss(node_latent_projected, batch_shape_vecs.detach().clone())
-            shape_mse_loss = self.L1Loss(node_latent_projected, batch_shape_vecs.detach().clone())
+            shape_mse_loss = self.mseLoss(node_latent_projected, batch_shape_vecs.detach().clone())
+            # shape_mse_loss = self.L1Loss(node_latent_projected, batch_shape_vecs.detach().clone())
             loss_dict['mse_shape'] = shape_mse_loss.mean()
 
             children_feats = []
@@ -1294,8 +1294,8 @@ class RecursiveDeepSDFDecoder(nn.Module):
             gt_latent_parts_indices = torch.tensor(gt_latent_parts_indices).to(cuda_device)
             batch_vecs = self.lat_vecs(gt_latent_parts_indices)
             children_feats_projected = self.part_latent_projector(children_feats)
-            # parts_mse_loss = self.mseLoss(children_feats_projected, batch_vecs.detach().clone())
-            parts_mse_loss = self.L1Loss(children_feats_projected, batch_vecs.detach().clone())
+            parts_mse_loss = self.mseLoss(children_feats_projected, batch_vecs.detach().clone())
+            # parts_mse_loss = self.L1Loss(children_feats_projected, batch_vecs.detach().clone())
             loss_dict['mse_parts'] = parts_mse_loss.mean()
 
             # gather information
@@ -1316,12 +1316,16 @@ class RecursiveDeepSDFDecoder(nn.Module):
 
             # train exist scores
             child_exists_loss = F.binary_cross_entropy_with_logits(
-                input=child_exists_logits, target=child_exists_gt, reduction='none')
+                input=child_exists_logits,
+                target=child_exists_gt,
+                reduction='none')
             child_exists_loss = child_exists_loss.sum()
 
             # train edge exists scores
             edge_exists_loss = F.binary_cross_entropy_with_logits(
-                input=edge_exists_logits, target=edge_exists_gt, reduction='none')
+                input=edge_exists_logits,
+                target=edge_exists_gt,
+                reduction='none')
             edge_exists_loss = edge_exists_loss.sum()
             # rescale to make it comparable to other losses,
             # which are in the order of the number of child nodes
@@ -1332,7 +1336,8 @@ class RecursiveDeepSDFDecoder(nn.Module):
                 child_losses = self.node_recon_loss_latentless(
                     child_feats[:, matched_pred_idx[i], :], gt_node.children[matched_gt_idx[i]], sdf_data, level + 1,
                     encoder_features=encoder_features, rotation=rotation,
-                    pred_rotation=pred_rotation, parts_indices=parts_indices, epoch=epoch)
+                    pred_rotation=pred_rotation, parts_indices=parts_indices, epoch=epoch
+                )
 
                 root_cls_loss = root_cls_loss + child_losses['root_cls']
                 child_exists_loss = child_exists_loss + child_losses['exists']
