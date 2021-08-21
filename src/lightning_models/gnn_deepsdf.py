@@ -199,7 +199,7 @@ class GNNPartnetLightning(pl.LightningModule):
 
             # Learning latent space
             output = self.decoder.latent_recon_loss(x_roots[i][None, ...], gt_tree, sdf_parts[i],
-                                                    encoder_features=encoder_features[i],
+                                                    encoder_features=encoder_features[0],
                                                     rotation=0, parts_indices=parts_indices[i],
                                                     full_shape_idx=full_shape_indices[i],
                                                     epoch=self.current_epoch,
