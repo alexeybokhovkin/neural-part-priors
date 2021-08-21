@@ -533,6 +533,8 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
                 self.chair_parts_map[part_name][idx] = i
                 i += 1
 
+        print(self.chair_parts_map.keys())
+
     def __getitem__(self, index):
         partnet_scannet_id = self.object_names[index]
         tokens = partnet_scannet_id.split('_')
