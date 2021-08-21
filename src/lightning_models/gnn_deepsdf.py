@@ -172,14 +172,15 @@ class GNNPartnetLightning(pl.LightningModule):
         x_roots = []
         encoder_features = []
 
-        for i, gt_tree in enumerate(gt_trees):
-            x_root, feature = self.encoder.root_latents(scannet_geos[i][None, ...])
-            encoder_features += [feature]
+        # for i, gt_tree in enumerate(gt_trees):
+        #     x_root, feature = self.encoder.root_latents(scannet_geos[i][None, ...])
+        #     encoder_features += [feature]
+        #
+        #     x_roots += [x_root]
 
-            x_roots += [x_root]
-
-        # x_roots, features = self.encoder.root_latents(scannet_geos)
-        # encoder_features = features
+        print('Geo:', scannet_geos.shape)
+        x_roots, features = self.encoder.root_latents(scannet_geos)
+        encoder_features = features
 
         all_losses = []
 
