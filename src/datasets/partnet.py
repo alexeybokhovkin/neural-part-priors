@@ -524,9 +524,9 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
         i = 0
         with open('/rhome/abokhovkin/projects/DeepSDF/experiments/full_experiments/chair_parts/sv2_chairs_train.json', 'r') as f:
             chair_parts_list = json.load(f)
-        for part_id in chair_parts_list['ShapeNetV2']:
-            part_name = part_id.split('-')[1]
-            print(part_name, len(chair_parts_list['ShapeNetV2'][part_id]))
+        # for part_id in chair_parts_list['ShapeNetV2']:
+        #     part_name = part_id.split('-')[1]
+        #     print(part_name, len(chair_parts_list['ShapeNetV2'][part_id]))
         self.chair_parts_map = {}
         for part_id in chair_parts_list['ShapeNetV2']:
             part_name = part_id.split('-')[1]
@@ -535,8 +535,6 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
             for idx in chair_parts_list['ShapeNetV2'][part_id]:
                 self.chair_parts_map[part_name][idx] = i
                 i += 1
-
-        print(self.chair_parts_map.keys())
 
     def __getitem__(self, index):
         partnet_scannet_id = self.object_names[index]
@@ -581,7 +579,6 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
         # noise_full = None
         # full_shape_idx = self.existing_partnet_ids.index(partnet_id)
 
-        print('All children:', child_names)
         parts_indices = {x: self.chair_parts_map[x][obj_id] for x in child_names}
         full_shape_idx = self.chair_full_map[obj_id]
 
