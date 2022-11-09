@@ -12,6 +12,7 @@ import plyfile
 import time
 import skimage
 from scipy.ndimage import rotate
+import argparse
 
 from src.utils.config import load_config
 from src.utils.gnn import collate_feats
@@ -82,23 +83,22 @@ def convert_sdf_samples_to_ply(
 
 
 def main(args):
+    t0 = time.time()
     CLUSTER_DATA = '/cluster'
 
-    # datadir = os.path.join(CLUSTER_DATA, 'sorona/abokhovkin/part-segmentation/hierarchies_32_1lvl_filled_v2')
+    print('Cat name:', args.cat_name)
+
     datadir = '/cluster/pegasus/abokhovkin/part-segmentation/hierarchies_32_1lvl_v3'
 
-    # dataset = 'all_chair_partnet'
-    # dataset = 'all_chair_geoscan'
-    dataset = 'all_chair_scannet'
+    dataset = f'all_{args.cat_name}_mlcvnet'
     # dataset = 'all_chair_partnetpartial'
 
     partnet_to_dirs_path = os.path.join('partnet_to_dirs.pkl')
     shapenet_voxelized_path = os.path.join(CLUSTER_DATA, 'partnet-full-voxelized-32')
 
-    # sdf_data_source = '/cluster/sorona/abokhovkin/DeepSDF/ShapeNetV2_dim256_uniform_parts/SdfSamples/ShapeNetV2'
-    # sdf_data_source = '/cluster/pegasus/abokhovkin/DeepSDF/ShapeNetV2_dim256_uniform_parts_geoscan/SdfSamples/ShapeNetV2'
-    sdf_data_source = '/cluster/pegasus/abokhovkin/DeepSDF/ShapeNetV2_dim256_uniform_parts_scannet/SdfSamples/ShapeNetV2'
-    # sdf_data_source = '/cluster/pegasus/abokhovkin/DeepSDF/ShapeNetV2_dim256_partial_uniform/SdfSamples/ShapeNetV2'
+    # sdf_data_source = '/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_partial_uniform'
+    # sdf_data_source = '/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_parts_mlcvnet'
+    sdf_data_source = '/cluster/daidalos/abokhovkin/DeepSDF_v2/ShapeNetV2_dim256_parts_mlcvnet'
 
     parts_to_shapes_path = '/rhome/abokhovkin/projects/scannet-relationships/dicts/parts_to_shapes.json'
     shapes_to_cat_path = '/rhome/abokhovkin/projects/scannet-relationships/dicts/obj_to_cat.json'
@@ -106,23 +106,31 @@ def main(args):
 
     print('Create dataset')
 
+    print('Cat name:', args.cat_name)
+
     data_features = ['object']
-    train_dataset = 'train.txt'
+    dataset_list = 'test.txt'
     train_dataset = VoxelisedImplicitScanNetDataset(datadir=datadir,
                                                     dataset=dataset,
                                                     partnet_to_dirs_path=partnet_to_dirs_path,
-                                                    object_list=train_dataset,
+                                                    object_list=dataset_list,
                                                     data_features=data_features,
                                                     load_geo=True,
                                                     shapenet_voxelized_path=shapenet_voxelized_path,
-                                                    num_subsample_points=35000,
+                                                    num_subsample_points=150000, # 150000
                                                     sdf_data_source=sdf_data_source,
                                                     parts_to_shapes_path=parts_to_shapes_path,
                                                     shapes_to_cat_path=shapes_to_cat_path,
-                                                    partnet_to_parts_path=partnet_to_parts_path)
+                                                    partnet_to_parts_path=partnet_to_parts_path,
+                                                    cat_name=args.cat_name,
+                                                    eval_mode=False)
 
-    LOG_DIR = '/cluster/pegasus/abokhovkin/scannet-relationships/logs_deepsdf/GNNPartnet'
-    exp = 'deepsdf_parts_fullshape_geoscan_2_2_overfit100_fixed_1_l2_latent_1'
+    with open(os.path.join(datadir, dataset, dataset_list), 'r') as fin:
+        test_samples = fin.readlines()
+        test_samples = [x[:-1] for x in test_samples]
+
+    LOG_DIR = '/cluster/pegasus/abokhovkin/scannet-relationships/logs_deepsdf_finetune/GNNPartnet'
+    exp = 'deepsdf_parts_fullshape_mlcvnet_finetune'
     EXPERIMENT = os.path.join(LOG_DIR, exp)
 
     with open(os.path.join(EXPERIMENT, 'config.json'), 'r') as fin:
@@ -132,22 +140,22 @@ def main(args):
     config['datadir'] = datadir
     config['parts_to_ids_path'] = 'parts_to_ids.pkl'
     config['priors_path'] = os.path.join(config['datadir'], '../priors_geoscan/table_32_filled')
-    # config['dataset'] = 'all_chair_partnet'
-    # config['dataset'] = 'all_chair_geoscan'
-    config['dataset'] = 'all_chair_scannet'
+
+    config['dataset'] = f'all_{args.cat_name}_mlcvnet'
     # config['dataset'] = 'all_chair_partnetpartial'
 
     config['parts_to_shapes_path'] = parts_to_shapes_path
     config['shapes_to_cat_path'] = shapes_to_cat_path
     config['partnet_to_parts_path'] = partnet_to_parts_path
+    config['num_subsample_points'] = 32768
 
-    config['train_samples'] = 'train.txt'
-    config['val_samples'] = 'train.txt'
+    config['train_samples'] = dataset_list
+    config['val_samples'] = dataset_list
 
     print('Create model')
 
     device = torch.device('cuda:0')
-    model = GNNPartnetLightning(config)
+    model = GNNPartnetLightning(config, cat_name=args.cat_name)
 
     print('Load checkpoint')
 
@@ -159,18 +167,63 @@ def main(args):
     model.eval()
     model.freeze()
 
-    level_inference = 0.002
-    level_tto = 0.002
+    level_inference = 0.01 # 0.000
+    level_tto = 0.005 # 0.005
 
-    for i in range(7, 8):
+    # SAVE_BASEDIR = f'/cluster/valinor/abokhovkin/scannet-relationships-v2/test_output_{args.cat_name}_grid_{args.saveid}'
+    # SAVE_BASEDIR = f'/cluster/valinor/abokhovkin/scannet-relationships-v2/test_output_{args.cat_name}_grid_scale1.3_thr0.005_pnbig120_thrinf0.01_decshape12'
+
+    SAVE_BASEDIR = f'/cluster/valinor/abokhovkin/scannet-relationships-v2/test_output_full_cvpr'
+
+    # SAVE_BASEDIR = f'/cluster/daidalos/abokhovkin/scannet-relationships/test_output_full_eccv_interpolation'
+    # SAVE_BASEDIR = '/cluster/daidalos/abokhovkin/scannet-relationships/scene_aware/val_output_scene0430_00'
+    # exp = exp + f'_predlat_predpoints_{args.cat_name}_{args.bck_thr}_{args.constr_mode}'
+    exp = exp + f'_predlat_predpoints_{args.cat_name}'
+
+    SAVE_DIR = os.path.join(SAVE_BASEDIR, 'meshes_scannet', exp)
+    os.makedirs(SAVE_DIR, exist_ok=True)
+
+    print(SAVE_DIR)
+
+    t1 = time.time()
+
+    scene0621_00_samples = [0, 120, 126, 134, 213, 214, 273, 319, 327, 343, 417, 455, 620, 727, 730, 747, 832, 866, 891, 902, 920]
+    scene0342_00_samples = [1, 5, 60, 139, 144, 145, 174, 253, 312, 386, 557, 607, 643, 666, 787, 859]
+    scene0011_01_samples = [6, 140, 156, 322, 375, 506, 566, 632, 815, 827]
+    scene0081_02_samples = [11, 27, 118, 180, 186, 266, 336, 357, 372, 418, 427, 461, 476, 500, 551, 746, 804]
+    scene0088_00_samples = [14, 79, 98, 108, 187, 398, 540, 547, 574, 685, 752, 757, 788]
+    scene0015_00_samples = [15, 33, 289, 335, 359, 449, 588, 595, 664, 759]
+    scene0095_01_samples = [37, 240, 301, 346, 520, 535, 640, 678, 770, 849]
+    scene0500_00_samples = [38, 48, 65, 76, 104, 142, 172, 192, 216, 276, 280, 307, 369, 400, 424, 494, 516, 537, 603, 655]
+    scene0088_03_samples = [71, 96, 114, 131, 183, 202, 209, 220, 235, 258, 341, 401, 597, 648]
+    scene0430_00_samples = [132, 161, 164, 196, 245, 262, 294, 302, 358, 440, 604, 610, 614, 697, 800, 852, 873, 879]
+
+    test_scene_1 = [0, 120, 126, 134, 213, 214, 273, 319, 327, 343, 417, 455, 491, 577, 620, 727, 730, 747, 799, 832, 866, 891, 902, 920, ]
+    test_scene_2 = [2, 73, 199, 274, 511, 617, 654, 705, 857, ]
+    test_scene_3 = [4, 380, 414, 790, 803, ]
+    test_scene_4 = [6, 140, 156, 322, 375, 506, 566, 632, 815, 827, ]
+    test_scene_5 = [10, 291, 601, 642, 652, 845, 888, ]
+    test_scene_6 = [11, 27, 118, 180, 186, 266, 336, 357, 372, 418, 427, 461, 476, 500, 551, 746, 804, ]
+    test_scene_7 = [13, 42, 238, 453, 748, 789, 831, 892, ]
+    test_scene_8 = [15, 33, 211, 272, 289, 335, 348, 359, 449, 588, 595, 650, 661, 664, 759, 903, ]
+
+    animation_samples = ['29709_scene0609_02_3', '41286_scene0435_01_6', '39332_scene0435_01_4',
+                         '11713_scene0435_01_8', '36398_scene0549_00_3', '37961_scene0621_00_25',
+                         '28240_scene0621_00_21', '28240_scene0621_00_22', '23487_scene0257_00_0']
+
+    idx = 0
+    # 4 1 1 0 0
+    for i in range(27, len(train_dataset)):
         print('Object', i)
+        print('Only align:', args.only_align)
+
+        # if test_samples[i] not in animation_samples:
+        #     continue
 
         batch = list(train_dataset[i])
-        angle = 0
 
         orig_scan_geo = batch[0].cpu().numpy().astype('uint8')
-        rotated_scan_geo = rotate(orig_scan_geo, -angle, axes=[0, 2], reshape=False).astype('float32')
-        rotated_scan_geo_torch = torch.FloatTensor(rotated_scan_geo)[None, ...]
+        rotated_scan_geo_torch = torch.FloatTensor(orig_scan_geo)[None, ...]
 
         scan_geo = rotated_scan_geo_torch.to(device)
         batch[0] = (scan_geo,)
@@ -178,90 +231,161 @@ def main(args):
         batch[2] = (shape,)
         batch[3] = (batch[3],)
         batch[5] = (batch[5],)
-        output = model.tto_two_stage(batch, index=i)
 
-        SAVE_DIR = os.path.join('meshes_scannet', exp, str(i))
+        parts_indices = batch[9]
+        shape_idx = batch[10]
+
+        t2 = time.time()
+
+        output = model.tto_two_stage(batch, index=test_samples[i], only_align=args.only_align, bck_thr=0.25,
+                                     constr_mode=args.constr_mode, cat_name=args.cat_name,
+                                     scale=args.scale, wconf=args.wconf,
+                                     w_full_noise=args.w_full_noise, w_part_u_noise=args.w_part_u_noise,
+                                     w_part_part_noise=args.w_part_part_noise, lr_dec_full=args.lr_dec_full,
+                                     lr_dec_part=args.lr_dec_part, parts_indices=parts_indices, shape_idx=shape_idx,
+                                     store_dir=os.path.join(SAVE_BASEDIR, 'meshes_scannet', exp, test_samples[i]))
+
+        t3 = time.time()
+
+        SAVE_DIR = os.path.join(SAVE_BASEDIR, 'meshes_scannet', exp, test_samples[i])
         os.makedirs(SAVE_DIR, exist_ok=True)
-        for x in os.listdir(SAVE_DIR):
-            os.remove(os.path.join(SAVE_DIR, x))
+        # for x in os.listdir(SAVE_DIR):
+        #     if not x.endswith('.pth') or not x.endswith('.ply'):
+        #         os.remove(os.path.join(SAVE_DIR, x))
 
-        pred_sdfs = output[1][0]
-        for j, part_name in enumerate(pred_sdfs):
+        meta_data = output[6][0]
+
+        if args.only_align:
+            torch.save(meta_data[5], os.path.join(SAVE_DIR, 'icp.pth'))
+            torch.save(meta_data[6], os.path.join(SAVE_DIR, 'rot_matrix.pth'))
+            torch.save(meta_data[7], os.path.join(SAVE_DIR, 'rotation.pth'))
+
+        else:
+            torch.save(meta_data[6], os.path.join(SAVE_DIR, 'rot_matrix.pth'))
+            torch.save(meta_data[7], os.path.join(SAVE_DIR, 'rotation.pth'))
+            torch.save(meta_data[5], os.path.join(SAVE_DIR, 'icp_2.pth'))
+            torch.save(meta_data[0], os.path.join(SAVE_DIR, 'sdf_flat.pth'))
+            torch.save(meta_data[1], os.path.join(SAVE_DIR, 'sdf_flat_rot.pth'))
+            torch.save(meta_data[2], os.path.join(SAVE_DIR, 'sdf_full_unrot.pth'))
+            torch.save(meta_data[3], os.path.join(SAVE_DIR, 'scan_points_icp.pth'))
+            torch.save(meta_data[4], os.path.join(SAVE_DIR, 'mesh_points_icp.pth'))
+
+            # Save parts before TTO
+            pred_sdfs = output[1][0]
+            for j, part_name in enumerate(pred_sdfs):
+                try:
+                    convert_sdf_samples_to_ply(
+                        pred_sdfs[part_name]['sdf'],
+                        pred_sdfs[part_name]['vox_origin'],
+                        pred_sdfs[part_name]['vox_size'],
+                        os.path.join(SAVE_DIR, str(part_name) + '.ply'),
+                        offset=pred_sdfs[part_name]['offset'],
+                        scale=pred_sdfs[part_name]['scale'],
+                        level=level_inference
+                    )
+                except:
+                    print('Bad part before TTO:', test_samples[i])
+                    continue
+
+            SAVE_DIR = os.path.join(SAVE_BASEDIR, 'meshes_scannet', exp, test_samples[i])
+            os.makedirs(SAVE_DIR, exist_ok=True)
+
+            # Save shape before TTO
             try:
+                shape_sdf = output[2][0]
                 convert_sdf_samples_to_ply(
-                    pred_sdfs[part_name]['sdf'],
-                    pred_sdfs[part_name]['vox_origin'],
-                    pred_sdfs[part_name]['vox_size'],
-                    os.path.join(SAVE_DIR, str(part_name) + '.ply'),
-                    offset=pred_sdfs[part_name]['offset'],
-                    scale=pred_sdfs[part_name]['scale'],
+                    shape_sdf['sdf'],
+                    shape_sdf['vox_origin'],
+                    shape_sdf['vox_size'],
+                    os.path.join(SAVE_DIR, 'full_pred.ply'),
+                    offset=shape_sdf['offset'],
+                    scale=shape_sdf['scale'],
                     level=level_inference
                 )
-            except FileNotFoundError:
-                print(part_name)
-
-        SAVE_DIR = os.path.join('meshes_scannet', exp, str(i))
-        os.makedirs(SAVE_DIR, exist_ok=True)
-
-        shape_sdf = output[2][0]
-        convert_sdf_samples_to_ply(
-            shape_sdf['sdf'],
-            shape_sdf['vox_origin'],
-            shape_sdf['vox_size'],
-            os.path.join(SAVE_DIR, 'full_pred.ply'),
-            offset=shape_sdf['offset'],
-            scale=shape_sdf['scale'],
-            level=level_inference
-        )
-
-        SAVE_DIR = os.path.join('meshes_scannet', exp, str(i) + '_tto')
-        os.makedirs(SAVE_DIR, exist_ok=True)
-        for x in os.listdir(SAVE_DIR):
-            os.remove(os.path.join(SAVE_DIR, x))
-
-        pred_sdfs = output[3][0]
-        for j, part_name in enumerate(pred_sdfs):
-            try:
-                for k in range(len(pred_sdfs[part_name])):
-                    convert_sdf_samples_to_ply(
-                        pred_sdfs[part_name][k]['sdf'],
-                        pred_sdfs[part_name][k]['vox_origin'],
-                        pred_sdfs[part_name][k]['vox_size'],
-                        os.path.join(SAVE_DIR, part_name + '.' + str(k) + '.ply'),
-                        offset=pred_sdfs[part_name][k]['offset'],
-                        scale=pred_sdfs[part_name][k]['scale'],
-                        level=level_tto
-                    )
-
-                np.save(os.path.join(SAVE_DIR, part_name + '.pts.npy'), output[5][0][part_name][0])
-                np.save(os.path.join(SAVE_DIR, part_name + '.sdf.npy'), output[5][0][part_name][2])
-                np.save(os.path.join(SAVE_DIR, part_name + '.loss.' + str(0) + '.npy'), output[5][0][part_name][1])
-                np.save(os.path.join(SAVE_DIR, part_name + '.loss.' + str(1) + '.npy'), output[5][1][part_name][1])
             except:
-                print(part_name, k)
+                print('Bad full shape before TTO:', test_samples[i])
 
-        SAVE_DIR = os.path.join('meshes_scannet', exp, str(i) + '_tto')
-        os.makedirs(SAVE_DIR, exist_ok=True)
-        shape_sdf = output[4][0]
+            SAVE_DIR = os.path.join(SAVE_BASEDIR, 'meshes_scannet', exp, test_samples[i] + '_tto')
+            os.makedirs(SAVE_DIR, exist_ok=True)
+            # for x in os.listdir(SAVE_DIR):
+            #     if not x.endswith('.pth') or not x.endswith('.ply'):
+            #         os.remove(os.path.join(SAVE_DIR, x))
 
-        for k in range(len(shape_sdf)):
-            convert_sdf_samples_to_ply(
-                shape_sdf[k]['sdf'],
-                shape_sdf[k]['vox_origin'],
-                shape_sdf[k]['vox_size'],
-                os.path.join(SAVE_DIR, 'full_pred.' + str(k) + '.ply'),
-                offset=shape_sdf[k]['offset'],
-                scale=shape_sdf[k]['scale'],
-                level=level_tto
-            )
+            # Save parts after TTO
+            pred_sdfs = output[3][0]
+            for j, part_name in enumerate(pred_sdfs):
+                try:
+                    for k in range(len(pred_sdfs[part_name])):
+                        try:
+                            convert_sdf_samples_to_ply(
+                                pred_sdfs[part_name][k]['sdf'],
+                                pred_sdfs[part_name][k]['vox_origin'],
+                                pred_sdfs[part_name][k]['vox_size'],
+                                os.path.join(SAVE_DIR, part_name + '.' + str(k) + '.ply'),
+                                offset=pred_sdfs[part_name][k]['offset'],
+                                scale=pred_sdfs[part_name][k]['scale'],
+                                level=level_tto
+                            )
+                            torch.save(pred_sdfs[part_name][k]['latent'], os.path.join(SAVE_DIR, part_name + '.' + str(k) + '.lat_pth'))
+                        except:
+                            print('Bad part after TTO:', test_samples[i])
+                            continue
 
-        np.save(os.path.join(SAVE_DIR, 'full.pts.npy'), output[5][2][0])
-        np.save(os.path.join(SAVE_DIR, 'full.sdf.npy'), output[5][2][2])
-        np.save(os.path.join(SAVE_DIR, 'full.loss.' + str(0) + '.npy'), output[5][2][1])
-        np.save(os.path.join(SAVE_DIR, 'full.loss.' + str(1) + '.npy'), output[5][3][1])
+                    np.save(os.path.join(SAVE_DIR, part_name + '.pts.npy'), output[5][0][part_name][0])
+                    np.save(os.path.join(SAVE_DIR, part_name + '.sdf.npy'), output[5][0][part_name][2])
+                    np.save(os.path.join(SAVE_DIR, part_name + '.loss.' + str(0) + '.npy'), output[5][0][part_name][1])
+                    np.save(os.path.join(SAVE_DIR, part_name + '.loss.' + str(1) + '.npy'), output[5][1][part_name][1])
+                    if j == 0:
+                        np.save(os.path.join(SAVE_DIR, 'full.pts.npy'), output[5][0][part_name][3])
+                except:
+                    print(part_name, k)
+
+            SAVE_DIR = os.path.join(SAVE_BASEDIR, 'meshes_scannet', exp, test_samples[i] + '_tto')
+            os.makedirs(SAVE_DIR, exist_ok=True)
+            shape_sdf = output[4][0]
+
+            # Save shape after TTO
+            for j in range(len(shape_sdf)):
+                for k in range(len(shape_sdf[j])):
+                    try:
+                        convert_sdf_samples_to_ply(
+                            shape_sdf[j][k]['sdf'],
+                            shape_sdf[j][k]['vox_origin'],
+                            shape_sdf[j][k]['vox_size'],
+                            os.path.join(SAVE_DIR, f'full_pred.{j}.{k}.ply'),
+                            offset=shape_sdf[j][k]['offset'],
+                            scale=shape_sdf[j][k]['scale'],
+                            level=level_tto
+                        )
+                        torch.save(shape_sdf[j][k]['latent'], os.path.join(SAVE_DIR, f'full_pred.{j}.{k}.lat_pth'))
+                    except:
+                        print('Bad full shape after TTO:', test_samples[i])
+
+            t4 = time.time()
+
+        del output
 
         gc.collect()
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    # params
+    parser = argparse.ArgumentParser()
+    # data params
+    parser.add_argument('--cat_name', required=True, default='chair')
+    parser.add_argument('--bck_thr', required=True, default=0.5, type=float)
+    parser.add_argument('--constr_mode', required=True, default=0, type=int)
+    parser.add_argument('--only_align', action='store_true')
+    parser.add_argument('--wconf', required=True, default=0.0, type=float)
+    parser.add_argument('--scale', required=True, default=1.0, type=float)
+    parser.add_argument('--w_full_noise', required=True, default=1.0, type=float)
+    parser.add_argument('--w_part_u_noise', required=True, default=1.0, type=float)
+    parser.add_argument('--w_part_part_noise', required=True, default=1.0, type=float)
+    parser.add_argument('--lr_dec_full', required=True, default=0.0, type=float)
+    parser.add_argument('--lr_dec_part', required=True, default=0.0, type=float)
+
+    parser.add_argument('--saveid', required=True, default=1, type=int)
+
+    args = parser.parse_args()
+
+    main(args)

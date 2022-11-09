@@ -15,8 +15,8 @@ import umap
 from ..lightning_models.gnn_scannet_byol import GNNPartnetLightning
 from .gnn import rotate_tree_geos
 from .vox import load_sample
-from .metrics import grid_iou_by_part, grid_chamfer_distance_by_part, mean_chamfer, mean_iou
-from .metrics import chamfer_distance_by_parts, chamfer_distance_by_categories, instance_average
+from .old_metrics import grid_iou_by_part, grid_chamfer_distance_by_part, mean_chamfer, mean_iou
+from .old_metrics import chamfer_distance_by_parts, chamfer_distance_by_categories, instance_average
 from ..data_utils.hierarchy import Tree
 
 

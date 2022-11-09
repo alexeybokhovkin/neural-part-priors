@@ -1,5 +1,7 @@
 import numpy as np
 import quaternion
+import torch
+
 
 def from_tqs_to_matrix(translation, quater, scale):
     """
@@ -21,6 +23,7 @@ def from_tqs_to_matrix(translation, quater, scale):
     M = T.dot(R).dot(S)
     return M
 
+
 def decompose_mat4(M):
     R = M[0:3, 0:3]
     sx = np.linalg.norm(R[0:3, 0])
@@ -37,6 +40,7 @@ def decompose_mat4(M):
     t = M[0:3, 3]
     return t, q, s
 
+
 def make_M_from_tqs(t, q, s):
     q = np.quaternion(q[0], q[1], q[2], q[3])
     T = np.eye(4)
@@ -48,6 +52,7 @@ def make_M_from_tqs(t, q, s):
 
     M = T.dot(R).dot(S)
     return M
+
 
 def apply_transform(points, *args):
     """
@@ -87,6 +92,7 @@ def apply_transform(points, *args):
         points = points[:, :3]
 
     return points
+
 
 def apply_inverse_transform(points, *args):
     """
@@ -134,3 +140,30 @@ def apply_inverse_transform(points, *args):
 def add_forth_coord(points):
     """forth coordinate is const = 1"""
     return np.hstack((points, np.ones((len(points), 1))))
+
+
+def apply_transform_torch(points, *args):
+    # save origin dimensionality and add forth coordinate if needed
+    initial_dim = points.shape[-1]
+    if initial_dim == 3:
+        points = add_forth_coord_torch(points)
+
+    # transform each transformation to 4x4 matrix
+    transformations = []
+    for transform in args:
+        transformations.append(transform)
+
+    # main loop
+    for transform in transformations:
+        points = points @ transform.T
+
+    # back to origin dimensionality if needed
+    if initial_dim == 3:
+        points = points[:, :3]
+
+    return points
+
+
+def add_forth_coord_torch(points):
+    """forth coordinate is const = 1"""
+    return torch.hstack((points, torch.ones((len(points), 1)).to(points.device)))

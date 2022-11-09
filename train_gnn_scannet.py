@@ -5,6 +5,7 @@ import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+import torch
 
 from src.utils.config import load_config
 # from src.lightning_models.gnn_scannet_old import GNNPartnetLightning
@@ -35,6 +36,8 @@ def main(args):
     os.makedirs(os.path.join(config.checkpoint_dir, config.model, config.version, 'latents'), exist_ok=True)
     os.makedirs(CHECKPOINTS, exist_ok=True)
 
+    # torch.multiprocessing.set_start_method('spawn')
+
     tb_logger = TensorBoardLogger(os.path.join(config.checkpoint_dir),
                                   name=config.model,
                                   version=config.version)
@@ -53,6 +56,8 @@ def main(args):
     )
     model = GNNPartnetLightning(config)
 
+    print('Experiment:', config.version)
+
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     trainer = Trainer(
         callbacks=[CheckpointEveryEpoch(0, CHECKPOINTS, config.save_every), lr_monitor],
@@ -66,7 +71,7 @@ def main(args):
         log_every_n_steps=config.log_every_n_steps,
         fast_dev_run=False,
         # resume_from_checkpoint=config.resume_from_checkpoint,
-        accumulate_grad_batches=16 # 48
+        accumulate_grad_batches=1
     )
     trainer.fit(model)
 

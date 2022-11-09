@@ -136,3 +136,6 @@ meshes_scannet/
 test_notebooks/
 logs/
 scripts/
+all_results/
+all_results_eccv/
+meshes/

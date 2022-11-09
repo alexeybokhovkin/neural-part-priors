@@ -8,6 +8,7 @@ import os
 import random
 import torch
 import torch.utils.data
+import time
 
 import deep_sdf_utils.workspace as ws
 
@@ -70,7 +71,20 @@ def read_sdf_samples_into_ram(filename):
 
 
 def unpack_sdf_samples(filename, subsample=None, trunc_value=0.07, check_noise=True):
+    t0 = time.time()
+
     npz = np.load(filename)
+    # try:
+    #     # numpy
+    #     # npz = np.load(filename)
+    #     # torch
+    #     npz = torch.load(filename)
+    # except:
+    #     print(filename)
+    #     # raise ValueError
+    #     # npz = torch.load('/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_partial_uniform_pickle/SdfSamples/ShapeNetV2/03001627-chair_seat/7fc8b858cad8f5849df6f10c48eb6cee_40124_0.pth')
+
+    t1 = time.time()
 
     num_samples = int(1.00 * subsample)
     num_pos_samples = int(0.5 * num_samples)
@@ -80,8 +94,16 @@ def unpack_sdf_samples(filename, subsample=None, trunc_value=0.07, check_noise=T
     if subsample is None:
         return npz
 
-    pos_tensor = remove_nans(torch.from_numpy(npz["pos"].astype('float32')))
-    neg_tensor = remove_nans(torch.from_numpy(npz["neg"].astype('float32')))
+    # pos_tensor = remove_nans(torch.from_numpy(npz["pos"].astype('float32')))
+    # neg_tensor = remove_nans(torch.from_numpy(npz["neg"].astype('float32')))
+    # numpy
+    pos_tensor = torch.from_numpy(npz["pos"].astype('float32'))
+    neg_tensor = torch.from_numpy(npz["neg"].astype('float32'))
+    # torch
+    # pos_tensor = npz["pos"]
+    # neg_tensor = npz["neg"]
+
+    t2 = time.time()
 
     noise_full = None
     # if check_noise:
@@ -97,20 +119,37 @@ def unpack_sdf_samples(filename, subsample=None, trunc_value=0.07, check_noise=T
     #         neg_tensor = noise_part
 
     if len(pos_tensor) != 0:
-        pos_indices = np.random.choice(len(pos_tensor), num_pos_samples)
+        if num_pos_samples > len(pos_tensor):
+            all_indices = np.arange(len(pos_tensor))
+            pos_indices = np.hstack([np.random.choice(len(pos_tensor), num_pos_samples - len(pos_tensor)), all_indices])
+        else:
+            pos_indices = np.random.choice(len(pos_tensor), num_pos_samples, replace=False)
         sample_pos = pos_tensor[pos_indices]
     else:
         sample_pos = torch.zeros((num_pos_samples, 4))
         sample_pos[:, 3] = 0.07
     if len(neg_tensor) != 0:
-        neg_indices = np.random.choice(len(neg_tensor), num_neg_samples)
+        if num_neg_samples > len(neg_tensor):
+            all_indices = np.arange(len(neg_tensor))
+            neg_indices = np.hstack([np.random.choice(len(neg_tensor), num_neg_samples - len(neg_tensor)), all_indices])
+        else:
+            neg_indices = np.random.choice(len(neg_tensor), num_neg_samples, replace=False)
         sample_neg = neg_tensor[neg_indices]
     else:
         sample_neg = sample_pos
     # random_indices = np.random.choice(len(noise_part), num_random)
     # sample_random = noise_part[random_indices]
 
+    t3 = time.time()
+
     samples = torch.cat([sample_pos, sample_neg], 0)
+
+    t4 = time.time()
+    # print('(2) Load:', t1 - t0)
+    # print('(2) Remove nans:', t2 - t1)
+    # print('(2) Filter:', t3 - t2)
+    # print('(2) Sum:', t4 - t0)
+    # print()
 
     return samples, noise_full
 

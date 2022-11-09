@@ -20,6 +20,8 @@ class Decoder(nn.Module):
         use_tanh=False,
         latent_dropout=False,
         mode=0,
+        class_one_hot=False,
+        cat_name=None,
         **kwargs
     ):
         super(Decoder, self).__init__()
@@ -28,9 +30,23 @@ class Decoder(nn.Module):
             return []
 
         if mode == 1:
-            dims = [latent_size + (latent_size + 3)] + dims + [1]
+            dims = [latent_size + (latent_size + 63)] + dims + [1]
+        elif class_one_hot:
+            if cat_name == 'chair':
+                num_parts = 7
+            elif cat_name == 'table':
+                num_parts = 7
+            elif cat_name == 'storagefurniture':
+                num_parts = 5
+            elif cat_name == 'bed':
+                num_parts = 4
+            elif cat_name == 'trashcan':
+                num_parts = 5
+            else:
+                raise ValueError(f'Category name {cat_name} is unknown')
+            dims = [latent_size + num_parts + 63] + dims + [1]
         else:
-            dims = [latent_size + 3] + dims + [1]
+            dims = [latent_size + 63] + dims + [1]
 
         self.num_layers = len(dims)
         self.norm_layers = norm_layers

@@ -4,6 +4,7 @@
 #SBATCH --mail-user=alexey.bokhovkin@skoltech.ru
 #SBATCH --mem=32gb
 #SBATCH --cpus-per-task=4
+#SBATCH --partition=submit
 
 export PATH=/rhome/${USER}/miniconda3/bin/:$PATH
 source activate torch

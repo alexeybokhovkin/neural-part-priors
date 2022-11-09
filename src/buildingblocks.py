@@ -238,13 +238,9 @@ class ConvBlock(nn.Module):
                                              padding=padding)
 
     def forward(self, x):
-        # print('Input enc:', x.shape)
         if self.pooling is not None:
             x = self.pooling(x)
-            # print('After pool:', x.shape)
         x = self.basic_module(x)
-        # print('After conv:', x.shape)
-        # print()
 
         return x
 
@@ -266,12 +262,16 @@ class ConvEncoder(nn.Module):
         encoders = []
         for i, out_feature_num in enumerate(enc_out_f_maps):
             if i == 0:
+                print(i)
+                print(enc_in_f_maps[i], out_feature_num, enc_conv_kernel_sizes[i], enc_strides[i], enc_paddings[i])
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, apply_pooling=False,
                                     basic_module=basic_module,
                                     conv_layer_order=layer_orders[i], num_groups=num_groups,
                                     conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
                                     padding=enc_paddings[i])
             else:
+                print(i)
+                print(enc_in_f_maps[i], out_feature_num, enc_conv_kernel_sizes[i], enc_strides[i], enc_paddings[i])
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, basic_module=basic_module,
                                     conv_layer_order=layer_orders[i], num_groups=num_groups,
                                     conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],

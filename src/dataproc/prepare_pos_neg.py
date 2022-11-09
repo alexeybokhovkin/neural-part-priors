@@ -4,10 +4,9 @@ from tqdm import tqdm
 from sample import load_sample
 
 if __name__ == '__main__':
-    DATADIR = '/cluster_HDD/sorona/adai/data/shapenet_core/shapenetv2_dim256_partial/03001627'
-    SAVEDIR = '/cluster/pegasus/abokhovkin/DeepSDF/ShapeNetV2_dim256_partial/SdfSamples/ShapeNetV2/03001627'
+    DATADIR = '/cluster_HDD/sorona/adai/data/shapenet_core/shapenetv2_dim256_partial/03337140'
+    SAVEDIR = '/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_partial/SdfSamples/ShapeNetV2/03337140'
     os.makedirs(SAVEDIR, exist_ok=True)
-
     sdf_filenames = sorted([x for x in os.listdir(DATADIR) if x.endswith('frame0.sdf')])
 
     for sdf_filename in tqdm(sdf_filenames):
@@ -24,12 +23,13 @@ if __name__ == '__main__':
             locations_ones_world = locations_ones.dot(w2g)[:, :3] * 2
             sdfs = sample.sdfs
 
-            locations_ones_world_pos = np.array(
-                [locations_ones_world[i] for i in range(len(locations_ones_world)) if sdfs[i] >= 0])
-            sdfs_pos = np.array([sdfs[i] for i in range(len(sdfs)) if sdfs[i] >= 0])
-            locations_ones_world_neg = np.array(
-                [locations_ones_world[i] for i in range(len(locations_ones_world)) if sdfs[i] < 0])
-            sdfs_neg = np.array([sdfs[i] for i in range(len(sdfs)) if sdfs[i] < 0])
+            indices = np.where(sdfs >= 0)[0]
+            locations_ones_world_pos = locations_ones_world[indices]
+            sdfs_pos = sdfs[indices]
+
+            indices = np.where(sdfs < 0)[0]
+            locations_ones_world_neg = locations_ones_world[indices]
+            sdfs_neg = sdfs[indices]
 
             points_pos = np.hstack([locations_ones_world_pos, sdfs_pos[:, None]]).astype('float32')
             points_neg = np.hstack([locations_ones_world_neg, sdfs_neg[:, None]]).astype('float32')

@@ -10,6 +10,51 @@ from .gnn_contrast import RecursiveDecoder
 from .hier_decoder_deepsdf import RecursiveDeepSDFDecoder
 
 
+class GeoEncoderProj(nn.Module):
+    def __init__(self, enc_in_f_maps=None, enc_out_f_maps=None,
+                 layer_order='crg', num_groups=8, enc_strides=1, enc_paddings=1, enc_number_of_fmaps=5,
+                 enc_conv_kernel_sizes=3, num_convs_per_block=1, last_pooling_size=1,
+                 device='gpu', recursive_feat_size=256, recursive_hidden_size=256, variational=False,
+                 last_pooling=True, layer_orders=None, **kwargs):
+
+        super(GeoEncoderProj, self).__init__()
+
+        self.device = device
+        self.last_pooling = last_pooling
+
+        if not isinstance(enc_conv_kernel_sizes, list):
+            enc_conv_kernel_sizes = [enc_conv_kernel_sizes] * enc_number_of_fmaps
+        if not isinstance(enc_strides, list):
+            enc_strides = [enc_strides] * enc_number_of_fmaps
+        if not isinstance(enc_paddings, list):
+            enc_paddings = [enc_paddings] * enc_number_of_fmaps
+
+        self.voxel_encoder = ConvEncoder(enc_in_f_maps, enc_out_f_maps, layer_order, num_groups,
+                                         enc_strides, enc_paddings, enc_conv_kernel_sizes, num_convs_per_block,
+                                         layer_orders)
+        self.shape_feature_vector = FeatureVector(last_pooling_size, pooling=True)
+
+        self.mlp = nn.ModuleList([nn.Linear(256, 256),
+                                  nn.ReLU(),
+                                  nn.Linear(256, 256),
+                                  nn.ReLU(),
+                                  nn.Linear(256, 256)
+                                  ])
+
+        self.mseLoss = nn.MSELoss()
+
+    def forward(self, x_foreground):
+        x_root, features = self.voxel_encoder(x_foreground)
+        if self.last_pooling:
+            x_root = self.shape_feature_vector(x_root)
+        for layer in self.mlp:
+            x_root = layer(x_root)
+        return x_root, features
+
+    def encode_loss(self, x_root, gt_root):
+        return self.mseLoss(x_root, gt_root)
+
+
 class GeoEncoder(nn.Module):
     def __init__(self, enc_in_f_maps=None, enc_out_f_maps=None,
                  layer_order='crg', num_groups=8, enc_strides=1, enc_paddings=1, enc_number_of_fmaps=5,
@@ -196,14 +241,16 @@ class HierarchicalDecoder(nn.Module):
 class HierarchicalDeepSDFDecoder(nn.Module):
     def __init__(self, recursive_feat_size=128, recursive_hidden_size=128,
                  max_child_num=10, device='gpu', edge_symmetric_type='avg', num_iterations=0,
-                 edge_type_num=0, num_parts=0, num_shapes=0, deep_sdf_specs=None, **kwargs):
+                 edge_type_num=0, num_parts=0, num_shapes=0, deep_sdf_specs=None,
+                 cat_name=None, class2id=None, **kwargs):
 
         super(HierarchicalDeepSDFDecoder, self).__init__()
 
         self.recursive_decoder = RecursiveDeepSDFDecoder(recursive_feat_size, recursive_hidden_size,
                                                          max_child_num, device, edge_symmetric_type,
                                                          num_iterations, edge_type_num,
-                                                         num_parts, num_shapes, deep_sdf_specs)
+                                                         num_parts, num_shapes, deep_sdf_specs, cat_name,
+                                                         class2id)
 
         self.mseLoss = nn.MSELoss()
 
@@ -218,7 +265,9 @@ class HierarchicalDeepSDFDecoder(nn.Module):
         return output
 
     def forward_two_stage(self, x_root, sdf_data, full_label=None, encoder_features=None, rotation=None, gt_tree=None,
-                          index=0, parts_indices=None, full_shape_idx=None, noise_full=None):
+                          index=0, parts_indices=None, full_shape_idx=None, noise_full=None,
+                          rot_aug=0, shift_x=0, shift_y=0, bck_thr=0.5, cat_name=None,
+                          scale=1):
         output = self.recursive_decoder.decode_structure_two_stage(x_root, sdf_data,
                                                                    full_label=full_label,
                                                                    encoder_features=encoder_features,
@@ -227,7 +276,10 @@ class HierarchicalDeepSDFDecoder(nn.Module):
                                                                    index=index,
                                                                    parts_indices=parts_indices,
                                                                    full_shape_idx=full_shape_idx,
-                                                                   noise_full=noise_full)
+                                                                   noise_full=noise_full,
+                                                                   rot_aug=rot_aug, shift_x=shift_x, shift_y=shift_y,
+                                                                   bck_thr=bck_thr, cat_name=cat_name,
+                                                                   scale=scale)
         return output
 
     def structure_recon_loss(self, x_root, gt_tree, sdf_data,
@@ -245,12 +297,14 @@ class HierarchicalDeepSDFDecoder(nn.Module):
                              encoder_features=None, rotation=None,
                              parts_indices=None, epoch=0,
                              full_shape_idx=None,
-                             noise_full=None):
+                             noise_full=None, rotations=None, class2id=None):
         return self.recursive_decoder.latent_recon_loss(x_root, gt_tree, sdf_data,
                                                         encoder_features=encoder_features, rotation=rotation,
                                                         parts_indices=parts_indices, epoch=epoch,
                                                         full_shape_idx=full_shape_idx,
-                                                        noise_full=noise_full)
+                                                        noise_full=noise_full,
+                                                        rotations=rotations,
+                                                        class2id=class2id)
 
     def deepsdf_recon_loss(self, sdf_data, parts_indices=None, epoch=0,
                            full_shape_idx=None, noise_full=None):
@@ -263,8 +317,24 @@ class HierarchicalDeepSDFDecoder(nn.Module):
     def get_latent_shape_vecs(self):
         return self.recursive_decoder.get_latent_shape_vecs()
 
-    def tto(self, children_initial_data, shape_initial_data):
-        return self.recursive_decoder.tto(children_initial_data, shape_initial_data)
+    def tto(self, children_initial_data, shape_initial_data, only_align=False, constr_mode=0, cat_name=None,
+            num_shapes=0, k_near=0, scene_id='0', wconf=0, w_full_noise=1, w_part_u_noise=1,
+            w_part_part_noise=1, lr_dec_full=0, lr_dec_part=0, target_sample_names=None,
+            sa_mode=None, parts_indices=None, shape_idx=None, store_dir=None):
+        return self.recursive_decoder.tto(children_initial_data, shape_initial_data,
+                                          only_align=only_align,
+                                          constr_mode=constr_mode,
+                                          cat_name=cat_name,
+                                          num_shapes=num_shapes,
+                                          k_near=k_near,
+                                          scene_id=scene_id,
+                                          wconf=wconf,
+                                          w_full_noise=w_full_noise, w_part_u_noise=w_part_u_noise,
+                                          w_part_part_noise=w_part_part_noise, lr_dec_full=lr_dec_full,
+                                          lr_dec_part=lr_dec_part,
+                                          target_sample_names=target_sample_names, sa_mode=sa_mode,
+                                          parts_indices=parts_indices, shape_idx=shape_idx,
+                                          store_dir=store_dir)
 
 
 
