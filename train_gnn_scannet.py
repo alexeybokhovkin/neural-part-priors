@@ -7,11 +7,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
 from src.utils.config import load_config
-# from src.lightning_models.gnn_scannet_old import GNNPartnetLightning
-# from src.lightning_models.gnn_scannet_contrastive import GNNPartnetLightning
 from src.lightning_models.gnn_deepsdf import GNNPartnetLightning
-# from src.lightning_models.gnn_scannet_byol import GNNPartnetLightning
-# from src.lightning_models.gnn_latent_learner import LatentLearner
 
 
 class CheckpointEveryEpoch(pl.Callback):
@@ -35,23 +31,13 @@ def main(args):
     os.makedirs(os.path.join(config.checkpoint_dir, config.model, config.version, 'latents'), exist_ok=True)
     os.makedirs(CHECKPOINTS, exist_ok=True)
 
+
     tb_logger = TensorBoardLogger(os.path.join(config.checkpoint_dir),
                                   name=config.model,
                                   version=config.version)
-    # checkpoint_callback = ModelCheckpoint(
-    #     monitor='val_loss',
-    #     dirpath=CHECKPOINTS,
-    #     filename='{epoch}-{val_loss:.4f}',
-    #     save_top_k=50
-    # )
-    checkpoint_callback = ModelCheckpoint(
-        monitor='train_loss',
-        mode='max',
-        dirpath=CHECKPOINTS,
-        filename='{epoch}-{train_loss:.4f}',
-        period=config.save_every
-    )
-    model = GNNPartnetLightning(config)
+    model = GNNPartnetLightning(config, mode='training')
+
+    print('Experiment name:', config.version)
 
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     trainer = Trainer(
@@ -66,7 +52,7 @@ def main(args):
         log_every_n_steps=config.log_every_n_steps,
         fast_dev_run=False,
         # resume_from_checkpoint=config.resume_from_checkpoint,
-        accumulate_grad_batches=16 # 48
+        accumulate_grad_batches=1
     )
     trainer.fit(model)
 

@@ -1,0 +1,6 @@
+@inproceedings{bokhovkin2022neuralparts,
+    title     = {Neural Part Priors: Learning to Optimize Part-Based Object Completion in RGB-D Scans},
+    author    = {Bokhovkin, Alexey and Dai, Angela},
+    journal   = {2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+    year      = {2022}
+}

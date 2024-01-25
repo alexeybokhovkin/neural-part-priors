@@ -132,7 +132,8 @@ experiments/
 meshes/
 meshes_scannet/
 *.out
-
+dataproc/
+dataproc_mlcvnet/
 test_notebooks/
 logs/
 scripts/
