@@ -65,4 +65,4 @@ def get_embedder_nerf(multires, input_dims=3, i=0):
 
 if __name__ == '__main__':
     embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
-    print(embedder_out_dim)
+    print('Embedder out dim:', embedder_out_dim)

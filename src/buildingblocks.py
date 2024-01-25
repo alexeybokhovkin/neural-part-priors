@@ -262,16 +262,12 @@ class ConvEncoder(nn.Module):
         encoders = []
         for i, out_feature_num in enumerate(enc_out_f_maps):
             if i == 0:
-                print(i)
-                print(enc_in_f_maps[i], out_feature_num, enc_conv_kernel_sizes[i], enc_strides[i], enc_paddings[i])
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, apply_pooling=False,
                                     basic_module=basic_module,
                                     conv_layer_order=layer_orders[i], num_groups=num_groups,
                                     conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
                                     padding=enc_paddings[i])
             else:
-                print(i)
-                print(enc_in_f_maps[i], out_feature_num, enc_conv_kernel_sizes[i], enc_strides[i], enc_paddings[i])
                 encoder = ConvBlock(enc_in_f_maps[i], out_feature_num, basic_module=basic_module,
                                     conv_layer_order=layer_orders[i], num_groups=num_groups,
                                     conv_kernel_size=enc_conv_kernel_sizes[i], stride=enc_strides[i],
@@ -349,29 +345,11 @@ class DeconvBlock(nn.Module):
     def forward(self, x, feature=None):
 
         if self.upsample is None:
-            # print('Input dec:', x.shape)
-            # print('Scale factor:', self.scale_factor)
             x_feature = F.interpolate(x, scale_factor=self.scale_factor, mode='trilinear')
-            # print('After up:', x_feature.shape)
             x = self.basic_module(x_feature)
-            # print('After conv:', x.shape)
-            # print()
         else:
-
-            # print('Input dec:', x.shape)
             x_feature = self.upsample(x)
-            # print('After up:', x.shape)
             x = self.basic_module(x_feature)
-            # print('After conv:', x.shape)
-            # if self.join == 1:
-            #     x = x + feature
-            # elif self.join == 2:
-                # print('Feat:', feature.shape)
-                # print(x.shape)
-                # x = torch.cat([x, feature], dim=1)
-            # print('After join:', x.shape)
-            # print()
-
         return x, x_feature
 
 
@@ -416,10 +394,6 @@ class ConvDecoder(nn.Module):
         for i, decoder in enumerate(self.decoders):
             if i >= 1:
                 feature = None
-                # if i >= len(features) or not features or features is None:
-                #     feature = None
-                # else:
-                #     feature = features[i]
                 x, x_feature = decoder(x, feature)
                 x_features.append(x_feature)
         if self.last_conv:
