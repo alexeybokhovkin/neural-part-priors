@@ -4,7 +4,13 @@ import importlib
 import torch
 import torch.nn as nn
 
+# import models
 from ..buildingblocks import FeatureVector, ConvEncoder, ConvDecoder
+from .hier_decoder_deepsdf_chair import RecursiveDeepSDFDecoder as RecursiveDeepSDFDecoder_chair
+from .hier_decoder_deepsdf_bed import RecursiveDeepSDFDecoder as RecursiveDeepSDFDecoder_bed
+from .hier_decoder_deepsdf_storagefurniture import RecursiveDeepSDFDecoder as RecursiveDeepSDFDecoder_storagefurniture
+from .hier_decoder_deepsdf_table import RecursiveDeepSDFDecoder as RecursiveDeepSDFDecoder_table
+from .hier_decoder_deepsdf_trashcan import RecursiveDeepSDFDecoder as RecursiveDeepSDFDecoder_trashcan
 
 
 class GeoEncoder(nn.Module):
@@ -96,7 +102,7 @@ class HierarchicalDeepSDFDecoder(nn.Module):
 
         super(HierarchicalDeepSDFDecoder, self).__init__()
 
-        RecursiveDeepSDFDecoder = getattr(importlib.import_module(f'.hier_decoder_deepsdf_{cat_name}'), 'RecursiveDeepSDFDecoder')
+        RecursiveDeepSDFDecoder = eval(f'RecursiveDeepSDFDecoder_{cat_name}')
         self.recursive_decoder = RecursiveDeepSDFDecoder(recursive_feat_size, recursive_hidden_size,
                                                          max_child_num, device, edge_symmetric_type,
                                                          num_iterations, edge_type_num,
@@ -149,6 +155,28 @@ class HierarchicalDeepSDFDecoder(nn.Module):
 
     def get_latent_shape_vecs(self):
         return self.recursive_decoder.get_latent_shape_vecs()
+    
+    def tto(self, children_initial_data, shape_initial_data, only_align=False,
+            num_shapes=0, k_near=0, wconf=0, w_full_noise=1, w_part_u_noise=1,
+            w_part_part_noise=1, lr_dec_full=0, lr_dec_part=0, target_sample_names=None,
+            sa_mode=None, parts_indices=None, shape_idx=None, store_dir=None, class2id=None):
+        return self.recursive_decoder.tto(children_initial_data, 
+                                          shape_initial_data,
+                                          only_align=only_align,
+                                          num_shapes=num_shapes,
+                                          k_near=k_near,
+                                          wconf=wconf,
+                                          w_full_noise=w_full_noise, 
+                                          w_part_u_noise=w_part_u_noise,
+                                          w_part_part_noise=w_part_part_noise, 
+                                          lr_dec_full=lr_dec_full,
+                                          lr_dec_part=lr_dec_part,
+                                          target_sample_names=target_sample_names, 
+                                          sa_mode=sa_mode,
+                                          parts_indices=parts_indices, 
+                                          shape_idx=shape_idx,
+                                          store_dir=store_dir,
+                                          class2id=class2id)
 
 
 

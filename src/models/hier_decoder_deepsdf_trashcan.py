@@ -16,8 +16,7 @@ from ..utils.gnn import linear_assignment
 from ..utils.losses import IoULoss
 from .deep_sdf_decoder import Decoder as DeepSDFDecoder
 from .gnn_contrast import LatentDecoder, NumChildrenClassifier, GNNChildDecoder, LatentProjector
-from ..utils.transformations import apply_transform, convert_sdf_samples_to_ply, create_grid, decode_sdf
-from ..utils.transformations import apply_transform_torch, from_tqs_to_matrix, decompose_mat4
+from ..utils.transformations import apply_transform, convert_sdf_samples_to_ply, create_grid, decode_sdf, apply_transform_torch, from_tqs_to_matrix, decompose_mat4
 from ..utils.embedder import get_embedder_nerf
 
 # sys.path.append('/home/bohovkin/cluster/abokhovkin_home/external_packages/chamferdist')
@@ -489,7 +488,7 @@ class RecursiveDeepSDFDecoder(nn.Module):
         self.max_child_num = max_child_num
 
         self.latent_decoder = LatentDecoder(feature_size, hidden_size, hidden_size)
-        self.root_classifier = NumChildrenClassifier(feature_size, hidden_size, 5)
+        # self.root_classifier = NumChildrenClassifier(feature_size, hidden_size, 5)
         self.rotation_classifier = NumChildrenClassifier(feature_size, hidden_size, 12)
         self.child_decoder = GNNChildDecoder(feature_size, hidden_size,
                                              max_child_num, edge_symmetric_type,
@@ -616,10 +615,10 @@ class RecursiveDeepSDFDecoder(nn.Module):
 
         return samples, len(sample_pos), sample_uniform_noise, sample_parts_noise
 
-    def adjust_embedding(self, children_data, shape_data, mode, only_align=False, constr_mode=0, cat_name=None,
-                         num_shapes=0, k_near=0, scene_id='0', wconf=0, w_full_noise=1, w_part_u_noise=1,
+    def adjust_embedding(self, children_data, shape_data, mode, only_align=False,
+                         num_shapes=0, k_near=0, wconf=0, w_full_noise=1, w_part_u_noise=1,
                          w_part_part_noise=1, lr_dec_full=0, lr_dec_part=0, target_sample_names=None,
-                         sa_mode=None, parts_indices=None, shape_idx=None, store_dir=None, class2id=None):
+                         sa_mode=None, store_dir=None, class2id=None):
 
         # the main wrapper for TTO
 
@@ -837,12 +836,6 @@ class RecursiveDeepSDFDecoder(nn.Module):
         cuda_device = node_latent.get_device()
 
         if level == 0:
-            root_cls_pred = self.root_classifier(node_latent)
-            root_cls_gt = torch.zeros(1, dtype=torch.long)
-            root_cls_gt[0] = self.label_to_id[gt_node.label]
-            root_cls_gt = root_cls_gt.to("cuda:{}".format(cuda_device))
-            root_cls_loss = self.childrenCELoss(root_cls_pred, root_cls_gt)
-
             rotation_cls_pred = self.rotation_classifier(node_latent)
             rotation_cls_gt = torch.zeros(1, dtype=torch.long)
             rotation_cls_gt[0] = rotations
@@ -850,8 +843,6 @@ class RecursiveDeepSDFDecoder(nn.Module):
             rotation_cls_CE_loss = self.childrenCELoss(rotation_cls_pred, rotation_cls_gt).mean()
             pred_rotation = self.softmax_layer(rotation_cls_pred)
             pred_rotation = int(torch.argmax(pred_rotation).cpu().detach().numpy())
-        else:
-            root_cls_loss = 0
 
         if level == 1:
             loss_dict = {}
@@ -859,7 +850,6 @@ class RecursiveDeepSDFDecoder(nn.Module):
             loss_dict['exists'] = torch.zeros((1, 1)).to(cuda_device)
             loss_dict['semantic'] = torch.zeros((1, 1)).to(cuda_device)
             loss_dict['edge_exists'] = torch.zeros((1, 1)).to(cuda_device)
-            loss_dict['root_cls'] = root_cls_loss
 
             return loss_dict
         else:
@@ -1035,7 +1025,6 @@ class RecursiveDeepSDFDecoder(nn.Module):
                 semantic_loss = semantic_loss + child_losses['semantic']
                 edge_exists_loss = edge_exists_loss + child_losses['edge_exists']
 
-            loss_dict['root_cls'] = 0
             loss_dict['exists'] = child_exists_loss.view((1))
             loss_dict['semantic'] = semantic_loss.view((1))
             loss_dict['edge_exists'] = edge_exists_loss.view((1))

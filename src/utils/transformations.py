@@ -132,6 +132,33 @@ def add_forth_coord(points):
     return np.hstack((points, np.ones((len(points), 1))))
 
 
+def apply_transform_torch(points, *args):
+    # save origin dimensionality and add forth coordinate if needed
+    initial_dim = points.shape[-1]
+    if initial_dim == 3:
+        points = add_forth_coord_torch(points)
+
+    # transform each transformation to 4x4 matrix
+    transformations = []
+    for transform in args:
+        transformations.append(transform)
+
+    # main loop
+    for transform in transformations:
+        points = points @ transform.T
+
+    # back to origin dimensionality if needed
+    if initial_dim == 3:
+        points = points[:, :3]
+
+    return points
+
+
+def add_forth_coord_torch(points):
+    """forth coordinate is const = 1"""
+    return torch.hstack((points, torch.ones((len(points), 1)).to(points.device)))
+
+
 def perform_rot(pc, aug_rot):
     angle = 7 * aug_rot
     angle = np.pi * angle / 180.
@@ -159,6 +186,7 @@ def perform_translate_y(pc, aug_trans):
 
     return pc
 
+
 # Checks if a matrix is a valid rotation matrix.
 def isRotationMatrix(R) :
     Rt = np.transpose(R)
@@ -166,6 +194,7 @@ def isRotationMatrix(R) :
     I = np.identity(3, dtype = R.dtype)
     n = np.linalg.norm(I - shouldBeIdentity)
     return n < 1e-6
+
 
 # Calculates rotation matrix to euler angles
 # The result is the same as MATLAB except the order
@@ -251,8 +280,8 @@ def convert_sdf_samples_to_ply(
 
 
 def create_grid(
-        decoder, latent_vec, N=256, max_batch=32 ** 3, offset=None, scale=None,
-        input_samples=None, add_feat=None, mode=0, class_one_hot=None
+    decoder, latent_vec, N=256, max_batch=32 ** 3, offset=None, scale=None,
+    input_samples=None, add_feat=None, mode=0, class_one_hot=None
 ):
     embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
     decoder.eval()

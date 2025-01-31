@@ -48,7 +48,7 @@ This training script is based on the original [DeepSDF](https://github.com/faceb
 --continue <specify the name of a checkpoint if you want to continue the training>
 ```
 
-We train both full shapes and shape parts until training curve is saturated. Our final loss values for all categories are ~2e-3 -- 3e-3.
+We train both full shapes and shape parts until training curve is saturated. Our final loss values for all categories are ~2e-3 - 3e-3.
 
 ### Pretraining using synthetic data
 Second, we use the pretrained embeddings from the previous state and learn mapping from synthetic incomplete voxel shapes to embeddings. Simultaneously we learn point cloud classification and parts prediction.
@@ -89,7 +89,7 @@ Third, we finetine the model on real-world ScanNet data. The script `finetune_gn
 
 ## Test-time optimization
 ### Straightforward TTO
-Finally, the trained model is ready to be applied for test-time optimization to real-world scenes. The corresponding script `perform_deepsdf_tto_slurm.sh` uses a config file 'configs/config_tto.yaml'.
+Finally, the trained model is ready to be applied for test-time optimization to real-world scenes. The corresponding script `perform_deepsdf_tto_slurm.sh` uses a config file `configs/config_tto.yaml`.
 
 ### Scene-aware TTO
 This part will be added later.

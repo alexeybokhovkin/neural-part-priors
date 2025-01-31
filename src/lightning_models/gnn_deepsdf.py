@@ -13,7 +13,7 @@ import pytorch_lightning as pl
 
 from src.models.gnn_models import GeoEncoder, HierarchicalDeepSDFDecoder
 from src.utils.hierarchy import Tree
-from src.datasets.partnet import generate_gnn_deepsdf_datasets, generate_gnn_deepsdf_scannet_datasets
+from src.datasets.partnet import generate_gnn_deepsdf_scannet_datasets
 from src.utils.gnn import collate_feats
 
 
@@ -24,7 +24,7 @@ class GNNPartnetLightning(pl.LightningModule):
 
         if isinstance(hparams, dict):
             hparams = Namespace(**hparams)
-        self.hparams = hparams
+        # self.hparams = hparams
         config = hparams.__dict__
         self.config = config
         for _k, _v in self.config.items():
@@ -96,86 +96,26 @@ class GNNPartnetLightning(pl.LightningModule):
         else:
             self.scene_aware_points_path = None
 
-        Tree.load_category_info(os.path.join(config['datadir'], config['dataset']))
+        Tree.load_category_info(os.path.join(config['datadir_trees'], config['dataset']))
         self.encoder = GeoEncoder(**config)
         self.decoder = HierarchicalDeepSDFDecoder(**config,
                                                   num_parts=self.num_parts,
                                                   num_shapes=self.num_shapes,
-                                                  cat_name=cat_name,
                                                   class2id=self.class2id,
                                                   scene_aware_points_path=self.scene_aware_points_path)
 
-        # mlcvnet v2
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_chair_entropypn_hardnoise_partialpoints/checkpoints/60.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_chair_entropypn2_hardnoise_partialpoints/checkpoints/30.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_table_entropypn_hardnoise_partialpoints/checkpoints/80.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_table_entropypn2_hardnoise_partialpoints/checkpoints/140.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_storagefurniture_entropypn_hardnoise_partialpoints/checkpoints/80.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_storagefurniture_entropypn2_hardnoise_partialpoints/checkpoints/80.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_bed_entropypn_hardnoise_partialpoints/checkpoints/120.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_bed_entropypn2_hardnoise_partialpoints/checkpoints/120.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_trashcan_entropypn_hardnoise_partialpoints/checkpoints/160.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_trashcan_entropypn2_hardnoise_partialpoints/checkpoints/80.ckpt'
-        # )
 
+        print('Mode:', mode)
         if mode in ['finetune', 'tto']:
+            print('START LOADING ENCODER')
             # LOAD ENCODER
             self.encoder_ckpt_path = self.config['encoder_ckpt_path']
             # self.encoder_ckpt_path = '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_chair_entropypn_hardnoise_partialpoints/checkpoints/60.ckpt'
             self.load_model_encoder(self.encoder_ckpt_path)
 
-        # mlcvnet v2
-        pretrained_dict = torch.load(
-            '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_chair_entropypn_hardnoise_partialpoints/checkpoints/60.ckpt'
-        )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_chair_entropypn2_hardnoise_partialpoints/checkpoints/30.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_table_entropypn_hardnoise_partialpoints/checkpoints/80.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_table_entropypn2_hardnoise_partialpoints/checkpoints/140.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_storagefurniture_entropypn_hardnoise_partialpoints/checkpoints/80.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_storagefurniture_entropypn2_hardnoise_partialpoints/checkpoints/80.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_bed_entropypn_hardnoise_partialpoints/checkpoints/120.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_bed_entropypn2_hardnoise_partialpoints/checkpoints/120.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_trashcan_entropypn_hardnoise_partialpoints/checkpoints/160.ckpt'
-        # )
-        # pretrained_dict = torch.load(
-        #     '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_trashcan_entropypn2_hardnoise_partialpoints/checkpoints/80.ckpt'
-        # )
 
         if mode in ['finetune', 'tto']:
+            print('START LOADING DECODER')
             # LOAD DECODER
             self.decoder_ckpt_path = self.config['decoder_ckpt_path']
             # self.decoder_ckpt_path = '/cluster/valinor/abokhovkin/scannet-relationships-v2/logs_deepsdf_mlcvnet/GNNPartnet/deepsdf_parts_fullshape_finetune_onehot_chair_entropypn_hardnoise_partialpoints/checkpoints/60.ckpt'
@@ -186,8 +126,6 @@ class GNNPartnetLightning(pl.LightningModule):
         self.load_deepsdf_outside(
             self.deepsdf_shape_path,
             self.deepsdf_parts_path
-            # f'/cluster/daidalos/abokhovkin/DeepSDF_v2/full_experiments_v2/{cat_name}_full_surface_pe',
-            # f'/cluster/daidalos/abokhovkin/DeepSDF_v2/full_experiments_v2/{cat_name}_parts_onehot_pe'
         )
 
         if mode in ['training', 'finetune']:
@@ -209,12 +147,28 @@ class GNNPartnetLightning(pl.LightningModule):
         shape_dict_update = {k[7:]: v for k, v in shape_dict_trained.items()}
         parts_dict_update = {k[7:]: v for k, v in parts_dict_trained.items()}
 
-        self.decoder.recursive_decoder.lat_shape_vecs.weight.data = shape_latents_dict_trained
-        self.decoder.recursive_decoder.lat_vecs.weight.data = parts_latents_dict_trained
-        shape_dict.update(shape_dict_update)
-        self.decoder.recursive_decoder.deepsdf_shape_decoder.load_state_dict(shape_dict)
-        parts_dict.update(parts_dict_update)
-        self.decoder.recursive_decoder.deepsdf_decoder.load_state_dict(parts_dict)
+        if self.mode in ['tto']:
+            self.decoder.recursive_decoder.lat_shape_vecs.weight.data = shape_latents_dict_trained
+            self.decoder.recursive_decoder.lat_vecs.weight.data = parts_latents_dict_trained
+            shape_dict.update(shape_dict_update)
+            self.decoder.recursive_decoder.deepsdf_shape_decoder.load_state_dict(shape_dict)
+            parts_dict.update(parts_dict_update)
+            self.decoder.recursive_decoder.deepsdf_decoder.load_state_dict(parts_dict)
+        else:
+            self.decoder.recursive_decoder.lat_shape_vecs.weight.data = shape_latents_dict_trained
+            self.decoder.recursive_decoder.lat_vecs.weight.data = parts_latents_dict_trained
+            shape_dict.update(shape_dict_update)
+            self.decoder.recursive_decoder.deepsdf_shape_decoder.load_state_dict(shape_dict)
+            parts_dict.update(parts_dict_update)
+            self.decoder.recursive_decoder.deepsdf_decoder.load_state_dict(parts_dict)
+
+            for param in self.decoder.recursive_decoder.deepsdf_shape_decoder.parameters():
+                param.requires_grad = False
+            for param in self.decoder.recursive_decoder.deepsdf_decoder.parameters():
+                param.requires_grad = False
+            self.decoder.recursive_decoder.lat_shape_vecs.weight.requires_grad = False
+            self.decoder.recursive_decoder.lat_vecs.weight.requires_grad = False
+
 
     def load_model_encoder(self, ckpt_path):
         pretrained_dict = torch.load(ckpt_path)
@@ -270,6 +224,8 @@ class GNNPartnetLightning(pl.LightningModule):
             transformed_noise = []
             for i, points in enumerate(all_points):
                 noise = noise_full[i]
+                # print(points)
+                # print(points.shape, noise.shape)
                 points[:, :, :3] = points[:, :, :3] * s[i]
                 noise[:, :3] = noise[:, :3] * s[i]
                 transformed_points += [points]
@@ -314,11 +270,11 @@ class GNNPartnetLightning(pl.LightningModule):
 
         scannet_geos = batch[0]
         gt_trees = batch[1]
-        sdf_parts = batch[5]
-        parts_indices = batch[6]
-        full_shape_indices = batch[7]
-        noise_full = batch[8]
-        dataset_indices = batch[9]
+        sdf_parts = batch[6]
+        parts_indices = batch[7]
+        full_shape_indices = batch[8]
+        noise_full = batch[9]
+        dataset_indices = batch[10]
 
         x_roots = []
         encoder_features = []
@@ -371,7 +327,7 @@ class GNNPartnetLightning(pl.LightningModule):
         losses = {'exists': 0,
                   'semantic': 0,
                   'edge_exists': 0,
-                  'root_cls': 0,
+                #   'root_cls': 0,
                   'rotation': 0,
                   'sdf': 0,
                   'shape_sdf': 0,
@@ -391,13 +347,14 @@ class GNNPartnetLightning(pl.LightningModule):
         return losses
 
     def training_step(self, batch, batch_idx):
-        Tree.load_category_info(os.path.join(self.config['datadir'], self.config['dataset']))
+        Tree.load_category_info(os.path.join(self.config['datadir_trees'], self.config['dataset']))
 
         batch[0] = [x[None, ...] for x in batch[0]]
         scannet_geos = torch.cat(batch[0]).unsqueeze(dim=1)
         gt_trees = batch[1]
         partnet_ids = batch[2]
         rotations = batch[3]
+        tokens = batch[4]
         sdf_filenames = batch[5]
         sdf_parts = batch[6]
         parts_indices = batch[7]
@@ -405,7 +362,7 @@ class GNNPartnetLightning(pl.LightningModule):
         noise_full = batch[9]
         indices = batch[10]
 
-        input_batch = tuple([scannet_geos, gt_trees, partnet_ids, rotations,
+        input_batch = tuple([scannet_geos, gt_trees, partnet_ids, rotations, tokens,
                              sdf_filenames, sdf_parts, parts_indices, full_shape_indices,
                              noise_full, indices])
 
@@ -429,7 +386,7 @@ class GNNPartnetLightning(pl.LightningModule):
         print('exists:', losses['exists'])
         print('semantic:', losses['semantic'])
         print('edge_exists:', losses['edge_exists'])
-        print('root_cls:', losses['root_cls'])
+        # print('root_cls:', losses['root_cls'])
         print('rotation:', losses['rotation'])
         print('sdf:', losses['sdf'])
         print('shape_sdf', losses['shape_sdf'])
@@ -486,13 +443,14 @@ class GNNPartnetLightning(pl.LightningModule):
             )
 
     def validation_step(self, batch, batch_idx):
-        Tree.load_category_info(os.path.join(self.config['datadir'], self.config['dataset']))
+        Tree.load_category_info(os.path.join(self.config['datadir_trees'], self.config['dataset']))
 
         batch[0] = [x[None, ...] for x in batch[0]]
         scannet_geos = torch.cat(batch[0]).unsqueeze(dim=1)
         gt_trees = batch[1]
         partnet_ids = batch[2]
         rotations = batch[3]
+        tokens = batch[4]
         sdf_filenames = batch[5]
         sdf_parts = batch[6]
         parts_indices = batch[7]
@@ -500,7 +458,7 @@ class GNNPartnetLightning(pl.LightningModule):
         noise_full = batch[9]
         indices = batch[10]
 
-        input_batch = tuple([scannet_geos, gt_trees, partnet_ids, rotations,
+        input_batch = tuple([scannet_geos, gt_trees, partnet_ids, rotations, tokens,
                              sdf_filenames, sdf_parts, parts_indices, full_shape_indices,
                              noise_full, indices])
 
@@ -524,7 +482,7 @@ class GNNPartnetLightning(pl.LightningModule):
         print('exists:', losses['exists'])
         print('semantic:', losses['semantic'])
         print('edge_exists:', losses['edge_exists'])
-        print('root_cls:', losses['root_cls'])
+        # print('root_cls:', losses['root_cls'])
         print('rotation:', losses['rotation'])
         print('sdf:', losses['sdf'])
         print('shape_sdf', losses['shape_sdf'])
@@ -566,12 +524,12 @@ class GNNPartnetLightning(pl.LightningModule):
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.config['batch_size'],
-                          shuffle=True, num_workers=32, drop_last=True,
+                          shuffle=True, num_workers=8, drop_last=True,
                           collate_fn=collate_feats)
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=self.config['batch_size'],
-                          shuffle=False, num_workers=32, drop_last=True,
+                          shuffle=False, num_workers=8, drop_last=True,
                           collate_fn=collate_feats)
 
     def tto_two_stage(self, batch, only_align=False,
@@ -610,7 +568,7 @@ class GNNPartnetLightning(pl.LightningModule):
 
         for i, x_root in enumerate(x_roots):
             cuda_device = x_root.get_device()
-            gt_tree = gt_trees[i][0].to("cuda:{}".format(cuda_device))
+            gt_tree = gt_trees[i].to("cuda:{}".format(cuda_device))
 
             output = self.decoder.forward_two_stage(x_root,
                                                     sdf_parts,
@@ -634,8 +592,8 @@ class GNNPartnetLightning(pl.LightningModule):
             all_meta_data += [meta_data]
 
             parts_sdfs_pred_tto, all_shape_sdf_pred_tto, parts_stats_before, parts_stats_after \
-                = self.decoder.tto(pred_output, shape_output, only_align=only_align, constr_mode=constr_mode, cat_name=cat_name,
-                                   num_shapes=num_shapes, k_near=k_near, scene_id=scene_id, wconf=wconf,
+                = self.decoder.tto(pred_output, shape_output, only_align=only_align,
+                                   num_shapes=num_shapes, k_near=k_near, wconf=wconf,
                                    w_full_noise=w_full_noise, w_part_u_noise=w_part_u_noise,
                                    w_part_part_noise=w_part_part_noise, lr_dec_full=lr_dec_full,
                                    lr_dec_part=lr_dec_part, target_sample_names=target_sample_names,

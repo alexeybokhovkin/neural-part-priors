@@ -14,33 +14,42 @@ def remove_nans(tensor):
     return tensor[~tensor_nan, :]
 
 
-def unpack_sdf_samples(filename, subsample=None):
+def unpack_sdf_samples(filename, subsample=None, alternative_filenames=None, data_mode='partnet'):
     npz = np.load(filename)
 
     if subsample is None:
         return npz
     pos_tensor = remove_nans(torch.from_numpy(npz["pos"]))
     neg_tensor = remove_nans(torch.from_numpy(npz["neg"]))
-    noise_tensor = torch.from_numpy(npz["random_part"]).float()
 
-    # split the sample into half
-    half = int(0.92 * subsample / 2)
-    noise_count = int(subsample - 2 * half)
+    if len(pos_tensor) == 0 or len(neg_tensor) == 0:
+        if alternative_filenames is not None:
+            for alternative_filename in alternative_filenames:
+                npz = np.load(alternative_filename)
+                pos_tensor = remove_nans(torch.from_numpy(npz["pos"]))
+                neg_tensor = remove_nans(torch.from_numpy(npz["neg"]))
+                # noise_tensor = torch.from_numpy(npz["random_part"]).float()
+                if len(pos_tensor) != 0 and len(neg_tensor) != 0:
+                    break
+        if alternative_filenames is None or len(pos_tensor) == 0 or len(neg_tensor) == 0:
+            pos_tensor = torch.from_numpy(np.array([[0.0, 0.0, 0.0, 1.0]]))
+            neg_tensor = torch.from_numpy(np.array([[0.0, 0.0, 0.0, 1.0]]))
+
+    half = int(subsample / 2)
 
     random_pos = (torch.rand(half) * pos_tensor.shape[0]).long()
     random_neg = (torch.rand(half) * neg_tensor.shape[0]).long()
-    random_noise = (torch.rand(noise_count) * noise_tensor.shape[0]).long()
 
     sample_pos = torch.index_select(pos_tensor, 0, random_pos)
     sample_neg = torch.index_select(neg_tensor, 0, random_neg)
-    sample_noise = torch.index_select(noise_tensor, 0, random_noise)
-    
-    sample_noise = torch.cat([sample_noise, 
-                                 0.1 * torch.ones(len(sample_noise), 1)], dim=1).float()
 
-    samples = torch.cat([sample_pos, sample_neg, sample_noise], 0)
+    samples = torch.cat([sample_pos, sample_neg], 0)
+    num_inf = torch.where(samples > 10.0, 1, 0).sum()
+    if num_inf > 0:
+        print('INF values:', num_inf, filename)
+        samples = torch.clamp(samples, -10.0, 10.0)
 
-    return samples
+    return samples.float()
 
 
 class VoxelisedScanNetAllShapesGNNDataset(Dataset):
@@ -175,7 +184,7 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
     def __init__(self, datadir, dataset, object_list, data_features, load_geo=False,
                  num_subsample_points=0, sdf_data_source=None,
                  cat_name=None, eval_mode=False, full_shape_list_path=None, parts_list_path=None,
-                 mlcvnet_noise_path=None, data_mode=None, partnet_noise_dir=None, mlcvnet_noise_dir=None,
+                 data_mode=None, partnet_noise_dir=None, mlcvnet_noise_dir=None,
                  partnet_noise_dummy=None):
         super(VoxelisedImplicitScanNetDataset, self).__init__(datadir, dataset,
                                                               object_list, data_features, load_geo)
@@ -248,6 +257,7 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
         self.existing_partnet_ids = sorted(list(set(self.existing_partnet_ids)))
         self.num_shapes = len(self.existing_partnet_ids)
 
+        print('Object list:', object_list)
         print('Num all shapes:', self.num_shapes)
         print('Num all parts:', self.num_parts)
 
@@ -283,10 +293,10 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
                 self.chair_parts_map[part_name][idx] = i
                 i += 1
 
-        # mlcvnet_noise_path = f'/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_parts_mlcvnet/train/SdfSamples/ShapeNetV2/02933112-background'
-        # mlcvnet_noise_path = f'/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_parts_mlcvnet/train/SdfSamples/ShapeNetV2/{cat_name_to_part_list_cat_id[self.cat_name]}-background'
+        # self.mlcvnet_noise_dir = f'/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_parts_mlcvnet/train/SdfSamples/ShapeNetV2/02933112-background'
+        # self.mlcvnet_noise_dir = f'/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_parts_mlcvnet/train/SdfSamples/ShapeNetV2/{cat_name_to_part_list_cat_id[self.cat_name]}-background'
         self.noise_partnetid_to_filename = {}
-        for filename in os.listdir(mlcvnet_noise_path):
+        for filename in os.listdir(self.mlcvnet_noise_dir):
             if filename.endswith('.npz'):
                 tokens = filename.split('_')
                 partnet_id = tokens[3]
@@ -357,21 +367,35 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
             if self.mode in ['train', 'val']:
                 if self.mode == 'train':
                     # self.sdf_data_source = '/cluster/daidalos/abokhovkin/DeepSDF_v2/ShapeNetV2_dim256_partial_uniform'
-                    rand_instance_id = np.random.randint(0, 10)
-                    sdf_filenames = [os.path.join(self.sdf_data_source, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{obj_id}_{partnet_id}_{rand_instance_id}.npz') for i in range(len(child_names))]
-                    sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, 6192)[0])[None, ...] for filename in sdf_filenames], dim=0)
+                    if self.data_mode == 'partnet':
+                        # partnet
+                        rand_instance_id = np.random.randint(0, 10)
+                        sdf_filenames = [os.path.join(self.sdf_data_source, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{obj_id}_{partnet_id}_{rand_instance_id}.npz') for i in range(len(child_names))]
+                        alternative_filenames = [[os.path.join(self.sdf_data_source, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{obj_id}_{partnet_id}_{j}.npz') for j in range(10)] for i in range(len(child_names))]
+                        sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, 6192, alternative_filenames[j]))[None, ...] for j, filename in enumerate(sdf_filenames)], dim=0)
+                    else:
+                        sdf_filenames = [os.path.join(self.sdf_data_source, self.mode, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{scan_id}_{obj_id}_{partnet_id}_{instance_id}.npz') for i in range(len(child_names))]
+                        sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, 6192))[None, ...] for j, filename in enumerate(sdf_filenames)], dim=0)
+
                 else:
-                    sdf_filenames = [os.path.join(self.sdf_data_source, self.mode, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{scan_id}_{obj_id}_{partnet_id}_{instance_id}.npz') for i in range(len(child_names))]
-                    sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, 6192)[0])[None, ...] for filename in sdf_filenames], dim=0) # self.num_subsample_points
+                    if self.data_mode == 'partnet':
+                        # partnet
+                        sdf_filenames = [os.path.join(self.sdf_data_source, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{obj_id}_{partnet_id}_{instance_id}.npz') for i in range(len(child_names))]
+                        alternative_filenames = [[os.path.join(self.sdf_data_source, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{obj_id}_{partnet_id}_{j}.npz') for j in range(10)] for i in range(len(child_names))]
+                        sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, 6192, alternative_filenames[j]))[None, ...] for j, filename in enumerate(sdf_filenames)], dim=0) # self.num_subsample_points
+                        # print('Dataset output 2', sdf_parts.shape)
+                    else:
+                        sdf_filenames = [os.path.join(self.sdf_data_source, self.mode, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{scan_id}_{obj_id}_{partnet_id}_{instance_id}.npz') for i in range(len(child_names))]
+                        sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, 6192))[None, ...] for j, filename in enumerate(sdf_filenames)], dim=0)
             else:
                 # mlcvnet test
                 if self.data_mode == 'mlcvnet':
                     sdf_filenames = [os.path.join(self.sdf_data_source, 'test', 'SdfSamples/ShapeNetV2', f'{cat_id}', f'{scan_id}_{obj_id}_{partnet_id}_{instance_id}.npz')]
-                    sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, 150000)[0])[None, ...] for filename in sdf_filenames], dim=0) # 350000 points
+                    sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, 150000))[None, ...] for filename in sdf_filenames], dim=0) # 350000 points
                 # partnet partial
                 else:
                     sdf_filenames = [os.path.join(self.sdf_data_source, 'SdfSamples/ShapeNetV2', f'{cat_id}-{child_names[i]}', f'{obj_id}_{partnet_id}_{instance_id}.npz') for i in range(len(child_names))]
-                    sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, self.num_subsample_points)[0])[None, ...] for filename in sdf_filenames], dim=0)
+                    sdf_parts = torch.cat([torch.FloatTensor(unpack_sdf_samples(filename, self.num_subsample_points))[None, ...] for filename in sdf_filenames], dim=0)
 
 
         # NOISE SECTION #
@@ -382,8 +406,7 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
                 noise_mode = self.mode
             else:
                 noise_mode = 'val'
-            # self.mlcvnet_noise_dir = f'/cluster/daidalos/abokhovkin/DeepSDF_v2/ShapeNetV2_dim256_parts_mlcvnet/{noise_mode}/SdfSamples/ShapeNetV2/{cat_id}-background'
-            noise_full = np.load(os.path.join(self.mlcvnet_noise_dir, f'{scan_id}_{obj_id}_{partnet_id}_{instance_id}.npz'))
+            noise_full = np.load(os.path.join(self.mlcvnet_noise_dir, f'{noise_mode}/SdfSamples/ShapeNetV2/{cat_id}-background/{scan_id}_{obj_id}_{partnet_id}_{instance_id}.npz'))
             indices = np.random.choice(len(noise_full['pos']), min(3096, len(noise_full['pos'])), replace=False)
             noise_full_pos = torch.FloatTensor(noise_full['pos'][indices])
             indices = np.random.choice(len(noise_full['neg']), min(3096, len(noise_full['neg'])), replace=False)
@@ -413,7 +436,7 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
             else:
                 try:
                     # self.partnet_noise_dir = f'/cluster/daidalos/abokhovkin/DeepSDF/ShapeNetV2_dim256_partial_uniform_pickle/SdfSamples/ShapeNetV2/{cat_id}-{child_names[0]}'
-                    noise_full = np.load(os.path.join(self.partnet_noise_dir, f'{obj_id}_{partnet_id}_{instance_id}.npz'))
+                    noise_full = np.load(os.path.join(self.partnet_noise_dir, f'{cat_id}-{child_names[0]}', f'{obj_id}_{partnet_id}_{instance_id}.npz'))
                     noise_full = noise_full['random_full']
                     noise_full = np.hstack([noise_full, 0.07 * np.ones((len(noise_full), 1))])
                     indices = np.random.choice(len(noise_full), min(len(noise_full), 2048))
@@ -441,13 +464,13 @@ class VoxelisedImplicitScanNetDataset(VoxelisedScanNetAllShapesGNNDataset):
         return output
 
 
-def generate_gnn_deepsdf_scannet_datasets(datadir=None, dataset=None,
+def generate_gnn_deepsdf_scannet_datasets(datadir_trees=None, dataset=None,
                                           train_samples='train.txt', val_samples='val.txt',
                                           data_features=('object',), load_geo=True,
                                           num_subsample_points=0,
                                           sdf_data_source=None, 
                                           cat_name='chair', eval_mode=False, full_shape_list_path=None, 
-                                          parts_list_path=None, mlcvnet_noise_path=None, data_mode=None, 
+                                          parts_list_path=None, data_mode=None, 
                                           partnet_noise_dir=None, mlcvnet_noise_dir=None,
                                           partnet_noise_dummy=None, **kwargs):
     if isinstance(data_features, str):
@@ -455,17 +478,17 @@ def generate_gnn_deepsdf_scannet_datasets(datadir=None, dataset=None,
 
     Dataset = VoxelisedImplicitScanNetDataset
 
-    train_dataset = Dataset(datadir, dataset, train_samples, data_features, load_geo,
+    train_dataset = Dataset(datadir_trees, dataset, train_samples, data_features, load_geo,
                             num_subsample_points,
                             sdf_data_source, 
                             cat_name, eval_mode, full_shape_list_path, parts_list_path,
-                            mlcvnet_noise_path, data_mode, partnet_noise_dir, mlcvnet_noise_dir,
+                            data_mode, partnet_noise_dir, mlcvnet_noise_dir,
                             partnet_noise_dummy)
-    val_dataset = Dataset(datadir, dataset, val_samples, data_features, load_geo,
+    val_dataset = Dataset(datadir_trees, dataset, val_samples, data_features, load_geo,
                           num_subsample_points,
                           sdf_data_source, 
                           cat_name, eval_mode, full_shape_list_path, parts_list_path,
-                          mlcvnet_noise_path, data_mode, partnet_noise_dir, mlcvnet_noise_dir,
+                          data_mode, partnet_noise_dir, mlcvnet_noise_dir,
                           partnet_noise_dummy)
 
     return {

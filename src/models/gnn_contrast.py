@@ -108,6 +108,9 @@ class GNNChildDecoder(nn.Module):
         ], dim=3)
         edge_latents = torch.relu(self.mlp_edge_latent(edge_latents))
 
+        # print('Edge latents', edge_latents.shape)
+        # print(edge_latents)
+
         # edge existence prediction
         edge_exists_logits_per_type = []
         for i in range(self.edge_type_num):
@@ -115,6 +118,8 @@ class GNNChildDecoder(nn.Module):
                 batch_size, self.max_child_num, self.max_child_num, 1)
             edge_exists_logits_per_type.append(edge_exists_logits_cur_type)
         edge_exists_logits = torch.cat(edge_exists_logits_per_type, dim=3)
+        # print('Edge exists', edge_exists_logits.shape)
+        # print(edge_exists_logits)
 
         """
             decoding stage message passing
@@ -131,6 +136,8 @@ class GNNChildDecoder(nn.Module):
         nodes_exist_mask = (child_exists_logits[0, edge_indices[:, 0], 0] > 0) \
                            & (child_exists_logits[0, edge_indices[:, 1], 0] > 0)
         edge_indices = edge_indices[nodes_exist_mask, :]
+        if edge_indices.shape[0] == 0:
+            edge_indices = torch.LongTensor([[0, 0]]).to(edge_exists_logits.device)
         edge_types = edge_types[nodes_exist_mask]
 
         # get latent features for the edges
@@ -177,6 +184,7 @@ class GNNChildDecoder(nn.Module):
                     raise ValueError(f'Unknown edge symmetric type: {self.edge_symmetric_type}')
 
                 child_feats = new_child_feats.view(1, max_childs, self.hidden_size)
+
 
             # save child features of this iteration
             iter_child_feats.append(child_feats)
