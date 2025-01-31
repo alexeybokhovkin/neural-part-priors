@@ -192,6 +192,28 @@ class GNNPartnetLightning(pl.LightningModule):
         print('Not loaded keys:', list(set(decoder_dict.keys()) - set(decoder_dict_update.keys())))
         self.decoder.load_state_dict(decoder_dict)
 
+    def load_model_encoder(self, ckpt_path):
+        pretrained_dict = torch.load(ckpt_path)
+        encoder_dict = self.encoder.state_dict()
+        encoder_dict_update = {k[8:]: v for k, v in pretrained_dict['state_dict'].items()
+                               if k[8:] in encoder_dict and
+                               pretrained_dict['state_dict'][k].shape == encoder_dict[k[8:]].shape}
+        encoder_dict.update(encoder_dict_update)
+        print('Updated keys (encoder):', len(encoder_dict_update))
+        print('Not loaded keys:', list(set(encoder_dict.keys()) - set(encoder_dict_update.keys())))
+        self.encoder.load_state_dict(encoder_dict)
+
+    def load_model_decoder(self, ckpt_path):
+        pretrained_dict = torch.load(ckpt_path)
+        decoder_dict = self.decoder.state_dict()
+        decoder_dict_update = {k[8:]: v for k, v in pretrained_dict['state_dict'].items()
+                               if k[8:] in decoder_dict and
+                               pretrained_dict['state_dict'][k].shape == decoder_dict[k[8:]].shape}
+        decoder_dict.update(decoder_dict_update)
+        print('Updated keys (decoder):', len(decoder_dict_update))
+        print('Not loaded keys:', list(set(decoder_dict.keys()) - set(decoder_dict_update.keys())))
+        self.decoder.load_state_dict(decoder_dict)
+
     def configure_optimizers(self):
         lr = self.config['learning_rate'] if self.mode == 'training' else 0.0002
         optimizer = optim.Adam(self.parameters(),
