@@ -121,10 +121,13 @@ This part will be added later.
 
 We provide the following checkpoints and files:
 
-Latent codebook and decoder checkpoints (DeepSDF) -- [deepsdf_ckpt.zip](https://drive.google.com/file/d/1o9c34HxMAt7FhvUpb1ZdmMrJxgkTDp8r/view?usp=sharing),
-Main model checkpoints -- [npps_ckpt.zip](https://drive.google.com/file/d/1dlltrvaUt1g1A12oEa227H1oo7d0PTzA/view?usp=sharing),
-Meta data for DeepSDF training (chair objects, parts lists) -- [chair_lists.zip](https://drive.google.com/file/d/1sofS_y4K_mBOuO4Kuls9QQdBMIstkxSs/view?usp=sharing),
-Voxelized training data (chair objects, ShapeNet/ScanNet) -- [chair_data.zip](https://drive.google.com/file/d/1NvzOvlCzgRkU6IT4HNgfFulRJrbxHU8d/view?usp=sharing).
+Latent codebook and decoder checkpoints (DeepSDF) - [deepsdf_ckpt.zip](https://drive.google.com/file/d/1o9c34HxMAt7FhvUpb1ZdmMrJxgkTDp8r/view?usp=sharing),
+
+Main model checkpoints - [npps_ckpt.zip](https://drive.google.com/file/d/1dlltrvaUt1g1A12oEa227H1oo7d0PTzA/view?usp=sharing),
+
+Meta data for DeepSDF training (chair objects, parts lists) - [chair_lists.zip](https://drive.google.com/file/d/1sofS_y4K_mBOuO4Kuls9QQdBMIstkxSs/view?usp=sharing),
+
+Voxelized training data (chair objects, ShapeNet/ScanNet) - [chair_data.zip](https://drive.google.com/file/d/1NvzOvlCzgRkU6IT4HNgfFulRJrbxHU8d/view?usp=sharing).
 
 ## Citation
 If you find our work useful, please cite using the following BibTex entry:
